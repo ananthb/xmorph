@@ -81,7 +81,7 @@ fn ensureDeviceNodes() void {
         std.fs.accessAbsolute(dev.name, .{}) catch {
             // Device doesn't exist, create it with mknod
             const path = std.posix.toPosixPath(dev.name) catch continue;
-            const dev_num = (@as(u64, dev.major) << 8) | @as(u64, dev.minor);
+            const dev_num = (@as(usize, dev.major) << 8) | @as(usize, dev.minor);
             const rc = linux.syscall4(.mknodat, @bitCast(@as(isize, -100)), @intFromPtr(&path), linux.S.IFCHR | 0o666, dev_num);
             if (linux.E.init(rc) != .SUCCESS) {
                 log("warning: cannot create {s}\n", .{dev.name});
@@ -93,7 +93,7 @@ fn ensureDeviceNodes() void {
     std.fs.accessAbsolute("/dev/net/tun", .{}) catch {
         std.fs.makeDirAbsolute("/dev/net") catch {};
         const path = std.posix.toPosixPath("/dev/net/tun") catch return;
-        const tun_dev = (@as(u64, 10) << 8) | @as(u64, 200);
+        const tun_dev = (@as(usize, 10) << 8) | @as(usize, 200);
         const rc = linux.syscall4(.mknodat, @bitCast(@as(isize, -100)), @intFromPtr(&path), linux.S.IFCHR | 0o666, tun_dev);
         if (linux.E.init(rc) != .SUCCESS) {
             log("warning: cannot create /dev/net/tun\n", .{});

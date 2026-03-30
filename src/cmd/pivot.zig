@@ -479,7 +479,7 @@ pub fn dryRun(allocator: std.mem.Allocator, cfg: *const config.Config, effective
     }
 
     try stdout.print("\nEntrypoint: {s}\n", .{cfg.entrypoint});
-    try stdout.print("Keep old root: {}\n", .{cfg.keep_old_root});
+    try stdout.print("Keep old root: {s}\n", .{cfg.keep_old_root});
     try stdout.print("Contain: {}\n", .{cfg.contain});
     try stdout.print("Timeout: {}s\n", .{cfg.timeout});
     if (cfg.headless) {
