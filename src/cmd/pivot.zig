@@ -333,7 +333,10 @@ pub fn runPivot(allocator: std.mem.Allocator, cfg: *const config.Config, effecti
             allocator,
             cfg.work_dir,
             container_argv.items,
-            .{ .env = if (effective_config) |c| c.env else null },
+            .{
+                .env = if (effective_config) |c| c.env else null,
+                .network = .host,
+            },
         ) catch |err| {
             scoped_log.err("Container failed: {}", .{err});
             return err;

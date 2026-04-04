@@ -61,6 +61,18 @@ nix build .#checks.x86_64-linux.nixos-run
 Tests Containerfile `RUN` execution and `--ssh-port` (dropbear install
 via `apk add`). Cannot run in the nix sandbox (no network).
 
+### Headscale integration (offline)
+
+```sh
+nix build .#checks.x86_64-linux.nixos-headscale -L
+```
+
+Boots two NixOS VMs: a Headscale server and a xenomorph node. Creates a
+pre-auth key, runs `xenomorph pivot --contain` with tailscale flags pointing
+at the local Headscale instance, and verifies the node connects to the Tailnet.
+Tests the full config pipeline end-to-end. Runs offline (tailscale binaries
+from nixpkgs, no registry pull).
+
 ## CI
 
 `nix flake check` runs: build (x86_64, aarch64, armv7), test, fuzz,

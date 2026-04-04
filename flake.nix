@@ -269,6 +269,14 @@
             '';
           };
 
+          # NixOS VM test: headscale integration (offline, ~2-3 min)
+          # Run: nix build .#checks.x86_64-linux.nixos-headscale -L
+          nixos-headscale = import ./nix/tests/headscale.nix {
+            inherit pkgs;
+            lib = pkgs.lib;
+            xenomorph-package = xenomorph-x86_64;
+          };
+
           # NOTE: nixos-registry-pull and nixos-run tests require internet access
           # and cannot run in the nix sandbox. Run them locally with:
           #   nix build .#checks.x86_64-linux.nixos-registry-pull
