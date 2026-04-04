@@ -3,46 +3,29 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
-
-permissions:
-  contents: write
+      - "v*"
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/nix-installer-action@main
 
-      - name: Setup Nix cache
-        uses: DeterminateSystems/magic-nix-cache-action@main
-
-      - name: Build release tarballs
-        run: nix run .#release
-
-      - name: Add version to filenames
+      - name: Configure Garnix cache
         run: |
-          cd release
-          VERSION="${GITHUB_REF_NAME}"
-          for f in xenomorph-*.tar.gz; do
-            newname="${f/xenomorph-/xenomorph-${VERSION}-}"
-            mv "$f" "$newname"
-          done
-          sha256sum *.tar.gz > SHA256SUMS
-          cat SHA256SUMS
+          nix config set extra-substituters "https://cache.garnix.io"
+          nix config set extra-trusted-public-keys "cache.garnix.io:CTFPyKSLcx5RMJKfLo5EEPUObbA78b0YQ2DTCJXqr9g="
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+      - name: Build release artifacts
+        run: nix build .#release
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
           files: |
-            release/*.tar.gz
-            release/SHA256SUMS
+            result/*
           generate_release_notes: true
-          draft: false
-          prerelease: ${{ contains(github.ref, '-rc') || contains(github.ref, '-beta') || contains(github.ref, '-alpha') }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

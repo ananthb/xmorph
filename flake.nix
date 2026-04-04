@@ -130,24 +130,16 @@
             ls -lh dist/
           '';
 
-          # Build release artifacts + checksums (writes to ./release/)
-          release = pkgs.writeShellScriptBin "xenomorph-release" ''
-            set -e
-            rm -rf release
-            mkdir -p release
-
-            echo "Building release tarballs..."
-            cp ${releaseTarball-x86_64}/*.tar.gz release/
-            cp ${releaseTarball-aarch64}/*.tar.gz release/
-            cp ${releaseTarball-armv7}/*.tar.gz release/
-
-            cd release
+          # Combined release with all artifacts for Garnix
+          release = pkgs.runCommand "xenomorph-${version}-release" {
+            nativeBuildInputs = [ pkgs.coreutils ];
+          } ''
+            mkdir -p $out
+            cp ${releaseTarball-x86_64}/*.tar.gz $out/
+            cp ${releaseTarball-aarch64}/*.tar.gz $out/
+            cp ${releaseTarball-armv7}/*.tar.gz $out/
+            cd $out
             sha256sum *.tar.gz > SHA256SUMS
-            echo ""
-            echo "Release artifacts:"
-            ls -lh
-            echo ""
-            cat SHA256SUMS
           '';
         };
 
@@ -276,7 +268,7 @@
             echo ""
             echo "Commands:"
             echo "  nix run .#build-all   # Build binaries for all platforms → dist/"
-            echo "  nix run .#release     # Build release tarballs + checksums → release/"
+            echo "  nix build .#release    # Build release tarballs + checksums → result/"
             echo "  nix flake check       # Run all checks including NixOS VM test"
           '';
         };
