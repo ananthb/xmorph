@@ -166,7 +166,6 @@
         };
 
         checks = {
-          inherit pre-commit;
           build = xenomorph-x86_64;
           build-aarch64 = xenomorph-aarch64;
           build-armv7 = xenomorph-armv7;
