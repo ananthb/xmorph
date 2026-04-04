@@ -3,5 +3,6 @@ zig-out
 result
 result-*
 .direnv
+.pre-commit-config.yaml
 release
 dist
