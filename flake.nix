@@ -4,6 +4,10 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    git-hooks = {
+      url = "github:cachix/git-hooks.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     runz = {
       url = "github:ananthb/runz";
       flake = false;
@@ -14,7 +18,7 @@
     };
   };
 
-  outputs = { self, nixpkgs, flake-utils, runz, oci-spec-zig }:
+  outputs = { self, nixpkgs, flake-utils, git-hooks, runz, oci-spec-zig }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
@@ -103,6 +107,24 @@
         releaseTarball-aarch64 = mkReleaseTarball "aarch64-linux" xenomorph-aarch64;
         releaseTarball-armv7 = mkReleaseTarball "armv7-linux" xenomorph-armv7;
 
+        pre-commit = git-hooks.lib.${system}.run {
+          src = ./.;
+          hooks = {
+            check-merge-conflicts.enable = true;
+            check-toml.enable = true;
+            check-yaml.enable = true;
+            detect-private-keys.enable = true;
+            end-of-file-fixer.enable = true;
+            trim-trailing-whitespace.enable = true;
+            zigfmt = {
+              enable = true;
+              name = "zig fmt";
+              entry = "${pkgs.zig}/bin/zig fmt";
+              types = [ "zig" ];
+            };
+          };
+        };
+
       in
       {
         packages = {
@@ -144,6 +166,7 @@
         };
 
         checks = {
+          inherit pre-commit;
           build = xenomorph-x86_64;
           build-aarch64 = xenomorph-aarch64;
           build-armv7 = xenomorph-armv7;
@@ -262,6 +285,7 @@
           ];
 
           shellHook = ''
+            ${pre-commit.shellHook}
             export PAGER="${pkgs.less}/bin/less"
             echo "Xenomorph development environment"
             echo "Zig version: $(zig version)"
