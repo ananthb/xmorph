@@ -308,12 +308,5 @@
       # NixOS module for xenomorph rescue pivot
       nixosModules.default = import ./nix/module.nix;
       nixosModules.xenomorph = import ./nix/module.nix;
-
-      garnix = {
-        builds = {
-          exclude = [ "aarch64-darwin" "x86_64-darwin" "aarch64-linux" ];
-        };
-        server.enable = true;
-      };
     };
 }
