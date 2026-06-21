@@ -1,0 +1,65 @@
+# goreleaser config — xmorph release pipeline.
+#
+# xmorph is Linux-only and pure-Go (CGO_ENABLED=0), so a single config
+# covers all three architectures. SHA256SUMS generation and cosign
+# signing happen in release.yml (so the workflow can sign the checksum
+# file once across all artifacts).
+version: 2
+project_name: xmorph
+
+dist: build
+
+builds:
+  - id: xmorph
+    main: ./cmd/xmorph
+    binary: xmorph
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s
+      - -w
+      - -X main.version={{.Version}}
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+      - arm
+    goarm:
+      - "7"
+    ignore:
+      # Only build arm/v7 (skip arm/v6 default that goreleaser would add).
+      - goarch: arm
+        goarm: "6"
+    mod_timestamp: '{{ .CommitTimestamp }}'
+
+archives:
+  - id: tarball
+    ids:
+      - xmorph
+    formats:
+      - tar.gz
+    # Match the prior nix release naming: xmorph-{arch}-linux.tar.gz,
+    # so anyone who pinned the URL still works.
+    name_template: 'xmorph-{{ if eq .Arch "amd64" }}x86_64{{ else if eq .Arch "arm64" }}aarch64{{ else if eq .Arch "arm" }}armv7{{ else }}{{ .Arch }}{{ end }}-linux'
+    wrap_in_directory: xmorph
+    files:
+      - src: init/systemd/*.service
+        dst: init/systemd
+      - README.md
+      - LICENSE
+
+checksum:
+  # Workflow generates a single SHA256SUMS file across all artifacts
+  # (and cosign-signs it) — disable goreleaser's per-artifact checksums.
+  disable: true
+
+snapshot:
+  version_template: '{{ incpatch .Version }}-snapshot'
+
+release:
+  # The workflow creates the GitHub release via softprops/action-gh-release
+  # after cosign signing, so goreleaser itself shouldn't.
+  disable: true

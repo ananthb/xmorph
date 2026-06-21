@@ -5,27 +5,53 @@ on:
     tags:
       - "v*"
 
+# goreleaser builds the per-arch binaries + tarballs. We compute the
+# combined SHA256SUMS afterward and cosign-sign it (keyless / OIDC).
+# Users verify the signed checksum file, then trust the listed hashes
+# for each individual artifact.
+
 jobs:
   release:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
-
-      - uses: DeterminateSystems/nix-installer-action@main
-
-      - uses: cachix/cachix-action@v15
         with:
-          name: ananthb
-          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          fetch-depth: 0
 
-      - name: Build release artifacts
-        run: nix build .#release
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: sigstore/cosign-installer@v3
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --clean
+
+      - name: Generate SHA256SUMS and cosign-sign
+        working-directory: build
+        # Write the sums file via a tempfile so a re-run (where
+        # SHA256SUMS may already exist) doesn't self-reference the
+        # freshly-truncated file through the `*.tar.gz` glob.
+        run: |
+          sha256sum *.tar.gz > ../SHA256SUMS
+          mv ../SHA256SUMS SHA256SUMS
+          cosign sign-blob --yes \
+            --output-signature SHA256SUMS.sig \
+            --output-certificate SHA256SUMS.pem \
+            SHA256SUMS
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            result/*
           generate_release_notes: true
+          files: |
+            build/*.tar.gz
+            build/SHA256SUMS
+            build/SHA256SUMS.sig
+            build/SHA256SUMS.pem

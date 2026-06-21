@@ -2,7 +2,7 @@
   description = "xmorph - Linux pivot_root tool for OCI images";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable-small";
     flake-utils.url = "github:numtide/flake-utils";
     git-hooks = {
       url = "github:cachix/git-hooks.nix";
@@ -18,26 +18,36 @@
 
         version = if (self ? shortRev) then self.shortRev else "dev";
 
+        # nixpkgs ships go 1.26.3; tailscale.com v1.100 (and our go.mod)
+        # require 1.26.4. Override by fetching upstream Go source.
+        # Bump version + hash via `nix-prefetch-url https://go.dev/dl/goX.Y.Z.src.tar.gz`
+        # then `nix hash convert --hash-algo sha256 --to sri <out>`.
+        go = pkgs.go.overrideAttrs (_old: rec {
+          version = "1.26.4";
+          src = pkgs.fetchurl {
+            url = "https://go.dev/dl/go${version}.src.tar.gz";
+            hash = "sha256-T2aKMvv8ETLmqIH7lowvHa2mMUkqM5IRc1+7JVpCYC0=";
+          };
+        });
+
+        buildGoModule = pkgs.buildGoModule.override { inherit go; };
+
         # vendorHash is populated by `nix build` on first run — it will print
         # the expected hash and you paste it here. lib.fakeHash forces that
         # error on first build; once set, the value is reproducible.
-        vendorHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        vendorHash = lib.fakeHash;
 
-        # Build a static xmorph for a given GOARCH (+ optional GOARM).
-        mkXmorph = goarch: goarm: pkgs.buildGoModule {
+        # From-source build for `nix build` / `nix run`. Release artifacts
+        # come from goreleaser (see .goreleaser.yaml); this derivation feeds
+        # the NixOS module + tests.
+        xmorph = buildGoModule {
           pname = "xmorph";
-          inherit version;
+          inherit version vendorHash;
           src = ./.;
-          inherit vendorHash;
-          env = {
-            CGO_ENABLED = "0";
-            GOOS = "linux";
-            GOARCH = goarch;
-          } // lib.optionalAttrs (goarm != "") { GOARM = goarm; };
+          env.CGO_ENABLED = "0";
           subPackages = [ "cmd/xmorph" ];
           ldflags = [ "-s" "-w" "-X main.version=${version}" ];
-          # Tests run in CI via `go test`; the nix sandbox can't exercise
-          # the pivot/mount paths anyway.
+          # Sandbox can't exercise the pivot/mount paths; tests run in CI.
           doCheck = false;
           meta = with lib; {
             description = "Linux pivot_root tool for OCI images";
@@ -48,34 +58,58 @@
           };
         };
 
-        xmorph-x86_64 = mkXmorph "amd64" "";
-        xmorph-aarch64 = mkXmorph "arm64" "";
-        xmorph-armv7 = mkXmorph "arm" "7";
-
-        mkReleaseTarball = name: xmorphBuild: pkgs.stdenv.mkDerivation {
-          pname = "xmorph-release-${name}";
-          inherit version;
-          src = xmorphBuild;
-
-          nativeBuildInputs = [ pkgs.gnutar pkgs.gzip ];
-
-          buildPhase = ''
-            mkdir -p xmorph/bin
-            cp $src/bin/xmorph xmorph/bin/
-            cp -r ${./.}/init xmorph/ 2>/dev/null || true
-            cp ${./.}/README.md xmorph/ 2>/dev/null || echo "No README" > xmorph/README.md
-            cp ${./.}/LICENSE xmorph/ 2>/dev/null || true
-          '';
-
-          installPhase = ''
-            mkdir -p $out
-            tar -czvf $out/xmorph-${name}.tar.gz xmorph
+        # xmorphLint: gofmt + go vet gate. Exposed as `apps.lint` so the
+        # pre-commit hook and CI both go through `nix run .#lint`.
+        xmorphLint = pkgs.writeShellApplication {
+          name = "xmorph-lint";
+          runtimeInputs = [ go ];
+          text = ''
+            unformatted="$(gofmt -l .)"
+            if [ -n "$unformatted" ]; then
+              echo "gofmt found unformatted files:" >&2
+              echo "$unformatted" >&2
+              echo "Run \`gofmt -w .\` to fix." >&2
+              exit 1
+            fi
+            # vet has to run against Linux because most packages use
+            # syscall/unix Linux-only symbols. Cross-vet from any host.
+            GOOS=linux CGO_ENABLED=0 go vet ./...
           '';
         };
 
-        releaseTarball-x86_64 = mkReleaseTarball "x86_64-linux" xmorph-x86_64;
-        releaseTarball-aarch64 = mkReleaseTarball "aarch64-linux" xmorph-aarch64;
-        releaseTarball-armv7 = mkReleaseTarball "armv7-linux" xmorph-armv7;
+        # xmorphTest: `go test ./...` against Linux. Skipped pure-Go-only
+        # packages would also be fine, but cross-test compiles all of them
+        # against linux so it's a real check.
+        xmorphTest = pkgs.writeShellApplication {
+          name = "xmorph-test";
+          runtimeInputs = [ go ];
+          # `go test` can't *run* Linux binaries on darwin, but it can
+          # compile-only-check with -c. On Linux, run for real.
+          text = if pkgs.stdenv.isLinux then ''
+            CGO_ENABLED=0 exec go test ./...
+          '' else ''
+            # Native macOS test for pure-Go packages, plus compile check
+            # of every package targeted at Linux.
+            go test ./internal/config/... ./internal/log/... ./internal/helpers/...
+            tmp=$(mktemp -d)
+            trap 'rm -rf "$tmp"' EXIT
+            GOOS=linux CGO_ENABLED=0 go build -o "$tmp/xmorph" ./cmd/xmorph
+            echo "linux cross-compile OK ($tmp/xmorph)"
+          '';
+        };
+
+        # xmorphBuild orchestrates lint + test as a single command;
+        # this is what CI runs and what contributors invoke before
+        # pushing. The name is "build" in the verification sense — the
+        # source-built binary lives under `packages.xmorph`.
+        xmorphBuild = pkgs.writeShellApplication {
+          name = "xmorph-build";
+          runtimeInputs = [ xmorphLint xmorphTest ];
+          text = ''
+            xmorph-lint
+            xmorph-test
+          '';
+        };
 
         pre-commit = git-hooks.lib.${system}.run {
           src = ./.;
@@ -87,79 +121,36 @@
             end-of-file-fixer.enable = true;
             trim-trailing-whitespace.enable = true;
             gofmt.enable = true;
-            # govet runs against the host OS; this is a Linux-only project
-            # so it would fail on darwin. CI runs `go vet` for real.
+            # govet is run via `nix run .#lint` (it needs GOOS=linux); the
+            # built-in govet hook runs against host OS and fails on darwin.
           };
         };
 
       in
       {
         packages = {
-          default = xmorph-x86_64;
-          xmorph = xmorph-x86_64;
-
-          inherit xmorph-x86_64 xmorph-aarch64 xmorph-armv7;
-
-          releaseTarball = releaseTarball-x86_64;
-          inherit releaseTarball-x86_64 releaseTarball-aarch64 releaseTarball-armv7;
-
-          # Build all platforms (writes binaries to ./dist/)
-          build-all = pkgs.writeShellScriptBin "xmorph-build-all" ''
-            set -e
-            rm -rf dist
-            mkdir -p dist
-            echo "Building x86_64..."
-            cp ${xmorph-x86_64}/bin/xmorph dist/xmorph-x86_64-linux
-            echo "Building aarch64..."
-            cp ${xmorph-aarch64}/bin/xmorph dist/xmorph-aarch64-linux
-            echo "Building armv7..."
-            cp ${xmorph-armv7}/bin/xmorph dist/xmorph-armv7-linux
-            echo ""
-            echo "Binaries:"
-            ls -lh dist/
-          '';
-
-          # Combined release: all three tarballs + SHA256SUMS
-          release = pkgs.runCommand "xmorph-${version}-release" {
-            nativeBuildInputs = [ pkgs.coreutils ];
-          } ''
-            mkdir -p $out
-            cp ${releaseTarball-x86_64}/*.tar.gz $out/
-            cp ${releaseTarball-aarch64}/*.tar.gz $out/
-            cp ${releaseTarball-armv7}/*.tar.gz $out/
-            cd $out
-            sha256sum *.tar.gz > SHA256SUMS
-          '';
+          default = xmorph;
+          inherit xmorph;
         };
 
-        checks = {
-          build = xmorph-x86_64;
-          build-aarch64 = xmorph-aarch64;
-          build-armv7 = xmorph-armv7;
-
-          test = pkgs.buildGoModule {
-            pname = "xmorph-test";
-            inherit version vendorHash;
-            src = ./.;
-            env.CGO_ENABLED = "0";
-            doCheck = true;
-            # buildGoModule's default check runs `go test ./...`. We only
-            # need the checkPhase output — discard the install artifact.
-            installPhase = "touch $out";
+        apps = {
+          lint = {
+            type = "app";
+            program = "${xmorphLint}/bin/xmorph-lint";
           };
+          test = {
+            type = "app";
+            program = "${xmorphTest}/bin/xmorph-test";
+          };
+          build = {
+            type = "app";
+            program = "${xmorphBuild}/bin/xmorph-build";
+          };
+        };
 
-          fmt = pkgs.runCommand "xmorph-fmt" {
-            nativeBuildInputs = [ pkgs.go ];
-          } ''
-            cd ${./.}
-            unformatted=$(gofmt -l .)
-            if [ -n "$unformatted" ]; then
-              echo "gofmt would reformat:"
-              echo "$unformatted"
-              exit 1
-            fi
-            touch $out
-          '';
+        checks = lib.optionalAttrs pkgs.stdenv.isLinux {
+          # Source build is the canonical sanity check.
+          build = xmorph;
 
           # NixOS VM test: local rootfs build + cache
           nixos-local = pkgs.testers.nixosTest {
@@ -170,7 +161,7 @@
 
               services.xmorph = {
                 enable = true;
-                package = xmorph-x86_64;
+                package = xmorph;
                 images = [ ];
                 warmupBuildCache = true;
               };
@@ -197,7 +188,7 @@
               };
 
               systemd.services.xmorph-cache-warm.serviceConfig.ExecStart =
-                lib.mkForce "${xmorph-x86_64}/bin/xmorph build --rootfs /var/lib/xmorph-test/rootfs.tar.gz";
+                lib.mkForce "${xmorph}/bin/xmorph build --rootfs /var/lib/xmorph-test/rootfs.tar.gz";
 
               virtualisation.memorySize = 2048;
             };
@@ -214,17 +205,20 @@
           nixos-headscale = import ./nix/tests/headscale.nix {
             inherit pkgs;
             lib = pkgs.lib;
-            xmorph-package = xmorph-x86_64;
+            xmorph-package = xmorph;
           };
         };
 
         devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [
+          buildInputs = [
             go
-            gopls
-            gotools
-            golangci-lint
-            less
+            pkgs.gopls
+            pkgs.gotools
+            pkgs.golangci-lint
+            # Release pipeline is driven by goreleaser. See .goreleaser.yaml.
+            pkgs.goreleaser
+            pkgs.cosign
+            pkgs.less
           ];
 
           shellHook = ''
@@ -234,11 +228,10 @@
             echo "Go version: $(go version)"
             echo ""
             echo "Commands:"
-            echo "  go build ./...         # build everything"
-            echo "  go test ./...          # run unit tests"
-            echo "  nix run .#build-all    # cross-compile to dist/"
-            echo "  nix build .#release    # release tarballs + SHA256SUMS"
-            echo "  nix flake check        # all checks + NixOS VM tests"
+            echo "  nix run .#build               # lint + test (what CI runs)"
+            echo "  nix build .#xmorph            # build binary via nix"
+            echo "  goreleaser build --snapshot   # smoke-test the release pipeline"
+            echo "  nix flake check               # all checks + NixOS VM tests"
           '';
         };
       }

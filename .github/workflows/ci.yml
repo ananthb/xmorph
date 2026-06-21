@@ -6,33 +6,45 @@ on:
   pull_request:
 
 jobs:
-  go:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-      - run: gofmt -l . | tee /tmp/gofmt.out && test ! -s /tmp/gofmt.out
-      - run: go vet ./...
-      - run: go test ./...
-      - name: Cross-compile (linux/amd64, arm64, arm)
-        env:
-          CGO_ENABLED: "0"
-          GOOS: linux
-        run: |
-          GOARCH=amd64 go build -o /tmp/xmorph-amd64 ./cmd/xmorph
-          GOARCH=arm64 go build -o /tmp/xmorph-arm64 ./cmd/xmorph
-          GOARCH=arm GOARM=7 go build -o /tmp/xmorph-armv7 ./cmd/xmorph
 
-  nix:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
+
       - uses: cachix/cachix-action@v15
         with:
           name: ananthb
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-      - run: nix flake check
+
+      - name: Build (lint + test)
+        run: nix run .#build
+
+      - name: Compile binary via nix
+        run: nix build
+
+  goreleaser-check:
+    name: goreleaser check + snapshot smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: check
+
+      - name: Snapshot build (smoke test)
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: build --snapshot --single-target --clean
