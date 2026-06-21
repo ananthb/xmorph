@@ -1,9 +1,12 @@
 package postpivot
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
+
+	"github.com/ananthb/xmorph/internal/tsnetauth"
 )
 
 // Run is the entry point for `xmorph --init` after the pivot. Reads
@@ -38,10 +41,18 @@ func Run(argv []string) int {
 		slog.Info("ssh requested", "port", cfg.SSH.Port)
 	}
 
-	// Tailscale env vars: M6 wires tsnet.RunSSH; M4 just leaves the
-	// env state alone.
+	// Tailscale: re-open the tsnet state persisted by the pre-pivot
+	// PreAuth and serve SSH on the tailnet. Runs in a goroutine so the
+	// entrypoint supervisor still takes the foreground.
 	if cfg != nil && cfg.Tailscale != nil {
-		slog.Info("tailscale config present", "args", cfg.Tailscale.Args)
+		hostname := hostnameFromArgs(cfg.Tailscale.Args)
+		go func() {
+			if err := tsnetauth.PostPivot(context.Background(), tsnetauth.PostPivotOptions{
+				Hostname: hostname,
+			}); err != nil {
+				slog.Error("tsnet post-pivot", "err", err)
+			}
+		}()
 	}
 
 	// Decide what to exec. Config-supplied entrypoint+command beats argv.

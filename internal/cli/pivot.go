@@ -16,8 +16,10 @@ import (
 	"github.com/ananthb/xmorph/internal/oci"
 	"github.com/ananthb/xmorph/internal/pivot"
 	"github.com/ananthb/xmorph/internal/postpivot"
+	"github.com/ananthb/xmorph/internal/helpers"
 	"github.com/ananthb/xmorph/internal/process"
 	"github.com/ananthb/xmorph/internal/rootfs"
+	"github.com/ananthb/xmorph/internal/tsnetauth"
 	"github.com/spf13/cobra"
 	"golang.org/x/sys/unix"
 )
@@ -67,8 +69,6 @@ arguments that would otherwise be interpreted as flags.`,
 func runPivot(ctx context.Context, cfg *config.Config, stdout interface {
 	Write(p []byte) (n int, err error)
 }) error {
-	_ = ctx
-
 	if cfg.DryRun {
 		printDryRun(stdout, cfg)
 		return nil
@@ -118,6 +118,26 @@ func runPivot(ctx context.Context, cfg *config.Config, stdout interface {
 	}
 	if err := postpivot.CopyBinary(cfg.WorkDir); err != nil {
 		return fmt.Errorf("copy binary: %w", err)
+	}
+
+	// Pre-pivot tailscale auth: validate the authkey against the live
+	// network NOW, while the old OS is still working. On success the
+	// state lands in {rootfs}/var/lib/tailscale, ready for the
+	// post-pivot supervisor to re-open. On auth failure we abort
+	// before destroying the running OS. Mirrors src/cmd/pivot.zig:316-335.
+	if cfg.TailscaleEnabled() {
+		ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		err := tsnetauth.PreAuth(ctx, tsnetauth.PreAuthOptions{
+			RootfsPath: cfg.WorkDir,
+			AuthKey:    cfg.TailscaleAuthkey,
+			Hostname:   helpers.TailscaleHostname(cfg),
+			ControlURL: cfg.TailscaleServer,
+		})
+		if err != nil {
+			return fmt.Errorf("pre-pivot tailscale auth failed; aborting to keep the running OS alive: %w", err)
+		}
+		slog.Info("tailscale pre-pivot auth ok")
 	}
 
 	// Memory headroom: warn before we commit to the pivot.

@@ -40,3 +40,45 @@ func readHostname() string {
 	}
 	return "host"
 }
+
+// TailscaleHostname returns the hostname tsnet should advertise to the
+// tailnet. Defaults to "<system-hostname>-xmorph"; if the user supplied
+// a custom --tailscale.args with --hostname=, we honor that prefix.
+func TailscaleHostname(cfg *config.Config) string {
+	// Honor an explicit --hostname= in --tailscale.args.
+	if cfg.TailscaleArgs != "" {
+		for _, tok := range splitArgs(cfg.TailscaleArgs) {
+			if rest, ok := stringsCutPrefix(tok, "--hostname="); ok && rest != "" {
+				return rest
+			}
+		}
+	}
+	return readHostname() + "-xmorph"
+}
+
+func splitArgs(s string) []string {
+	var out []string
+	var cur []byte
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == ' ' || c == '\t' {
+			if len(cur) > 0 {
+				out = append(out, string(cur))
+				cur = cur[:0]
+			}
+			continue
+		}
+		cur = append(cur, c)
+	}
+	if len(cur) > 0 {
+		out = append(out, string(cur))
+	}
+	return out
+}
+
+func stringsCutPrefix(s, prefix string) (string, bool) {
+	if len(s) >= len(prefix) && s[:len(prefix)] == prefix {
+		return s[len(prefix):], true
+	}
+	return "", false
+}
