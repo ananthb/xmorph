@@ -32,10 +32,10 @@
 
         buildGoModule = pkgs.buildGoModule.override { inherit go; };
 
-        # vendorHash is populated by `nix build` on first run — it will print
-        # the expected hash and you paste it here. lib.fakeHash forces that
-        # error on first build; once set, the value is reproducible.
-        vendorHash = lib.fakeHash;
+        # vendorHash is reproducible from go.mod + go.sum. Update by
+        # setting `vendorHash = lib.fakeHash` and rebuilding — Nix will
+        # print the expected hash, which you paste back here.
+        vendorHash = "sha256-gGLhkmEzCuzov8fAfkYsdE+Qxji9ZFvfFK2iTNHK5ME=";
 
         # From-source build for `nix build` / `nix run`. Release artifacts
         # come from goreleaser (see .goreleaser.yaml); this derivation feeds
