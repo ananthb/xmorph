@@ -22,6 +22,7 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        lib = pkgs.lib;
 
         version = if (self ? shortRev) then self.shortRev else "dev";
 
@@ -107,6 +108,31 @@
         releaseTarball-aarch64 = mkReleaseTarball "aarch64-linux" xenomorph-aarch64;
         releaseTarball-armv7 = mkReleaseTarball "armv7-linux" xenomorph-armv7;
 
+        # --- Go rewrite (M1 bootstrap; will replace Zig at M7) ---
+        # vendorHash gets set when we run `nix build .#xmorph-go` for the
+        # first time and Nix prints the expected hash. Leave as the
+        # all-zeros sentinel; CI computes it on first run.
+        xmorph-go = pkgs.buildGoModule {
+          pname = "xmorph";
+          inherit version;
+          src = ./.;
+          vendorHash = lib.fakeHash;
+          env.CGO_ENABLED = "0";
+          subPackages = [ "cmd/xmorph" ];
+          ldflags = [ "-s" "-w" "-X main.version=${version}" ];
+          # Skip tests in the Nix sandbox (they don't need network but
+          # some assume Linux-only paths; the CI runs them via `go test`
+          # separately).
+          doCheck = false;
+          meta = with pkgs.lib; {
+            description = "Linux pivot_root tool for OCI images (Go port, in progress)";
+            homepage = "https://github.com/ananthb/xmorph";
+            license = licenses.agpl3Only;
+            platforms = platforms.linux;
+            mainProgram = "xmorph";
+          };
+        };
+
         pre-commit = git-hooks.lib.${system}.run {
           src = ./.;
           hooks = {
@@ -132,6 +158,7 @@
           xenomorph = xenomorph-x86_64;
 
           inherit xenomorph-x86_64 xenomorph-aarch64 xenomorph-armv7;
+          inherit xmorph-go;
 
           releaseTarball = releaseTarball-x86_64;
           inherit releaseTarball-x86_64 releaseTarball-aarch64 releaseTarball-armv7;
