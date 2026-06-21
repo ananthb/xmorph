@@ -8,10 +8,27 @@ package cli
 import (
 	"fmt"
 	"io"
+	"log/slog"
+	"os"
+
+	xlog "github.com/ananthb/xmorph/internal/log"
 
 	"github.com/ananthb/xmorph/internal/helpers"
 	"github.com/spf13/cobra"
 )
+
+// LogHandler is the package-global slog.Handler for the binary. main()
+// installs it before invoking cobra; runPivot reaches in to flush the
+// in-memory buffer just before pivot_root.
+var LogHandler *xlog.Handler
+
+// InstallLogger creates the xmorph log handler at the given level,
+// sets it as slog's default, and stashes a reference in LogHandler so
+// the pivot path can flush the buffer pre-pivot.
+func InstallLogger(level slog.Level, colors bool) {
+	LogHandler = xlog.NewHandler(os.Stderr, level, colors)
+	slog.SetDefault(slog.New(LogHandler))
+}
 
 // NewRootCmd builds the top-level `xmorph` command with `pivot`, `build`,
 // and `version` subcommands. Output streams default to the cobra
@@ -27,6 +44,13 @@ supports headless operation over Tailscale (in-process via tsnet).`,
 		Version:       helpers.Version,
 		SilenceUsage:  true,
 		SilenceErrors: false,
+		PersistentPreRun: func(cmd *cobra.Command, _ []string) {
+			if v, _ := cmd.Flags().GetBool("verbose"); v {
+				if LogHandler != nil {
+					LogHandler.SetLevel(slog.LevelDebug)
+				}
+			}
+		},
 	}
 	root.SetVersionTemplate("xmorph {{.Version}}\n")
 	if stdout != nil {

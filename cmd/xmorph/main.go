@@ -9,11 +9,14 @@
 package main
 
 import (
-	"fmt"
+	"log/slog"
 	"os"
 
 	"github.com/ananthb/xmorph/internal/cli"
 	"github.com/ananthb/xmorph/internal/helpers"
+	"github.com/ananthb/xmorph/internal/postpivot"
+
+	"golang.org/x/term"
 )
 
 // version is overridden at link time via -ldflags="-X main.version=..."
@@ -29,11 +32,11 @@ func init() {
 func main() {
 	// Re-exec sentinel for the post-pivot init path. Checked BEFORE cobra
 	// so flag parsing doesn't trip over the absence of a subcommand.
-	// M4 wires this to postpivot.Run.
 	if len(os.Args) > 1 && os.Args[1] == "--init" {
-		fmt.Fprintln(os.Stderr, "xmorph --init: post-pivot init runtime arrives in M4")
-		os.Exit(1)
+		os.Exit(postpivot.Run(os.Args[2:]))
 	}
+
+	cli.InstallLogger(slog.LevelInfo, term.IsTerminal(int(os.Stderr.Fd())))
 
 	if err := cli.NewRootCmd(os.Stdout, os.Stderr).Execute(); err != nil {
 		os.Exit(1)
