@@ -6,6 +6,7 @@ const rootfs_builder = @import("../rootfs/builder.zig");
 const rootfs_verify = @import("../rootfs/verify.zig");
 const memory = @import("../util/memory.zig");
 const initscript = @import("../initscript.zig");
+const tailscale = @import("../tailscale.zig");
 const init_detector = @import("../init/detector.zig");
 const init_interface = @import("../init/interface.zig");
 const process_terminator = @import("../process/terminator.zig");
@@ -306,6 +307,31 @@ pub fn runPivot(allocator: std.mem.Allocator, cfg: *const config.Config, effecti
         }
         final_exec_args = try new_args.toOwnedSlice(std.heap.page_allocator);
         final_exec_cmd = initscript.init_script_path;
+    }
+
+    // Pre-pivot tailscale auth: validate the authkey + endpoint NOW, while
+    // the old OS is still working. On success the rootfs already has a
+    // fully-authenticated tailscale state, so post-pivot tailscaled just
+    // reconnects. On auth failure we abort before destroying the old OS.
+    if (cfg.tailscaleEnabled() and !cfg.contain) {
+        if (cfg.tailscale_authkey) |authkey| {
+            tailscale.preAuth(allocator, .{
+                .rootfs_path = cfg.work_dir,
+                .authkey = authkey,
+                .extra_args = effective_ts_args,
+            }) catch |err| switch (err) {
+                error.AuthFailed, error.AuthTimeout, error.SocketTimeout, error.StartFailed => {
+                    scoped_log.err("Pre-pivot tailscale auth failed ({}); aborting to keep the running OS alive", .{err});
+                    return err;
+                },
+                error.BinaryNotFound => {
+                    scoped_log.warn("Tailscale binaries not present in rootfs; skipping pre-pivot validation. Authkey will be tried post-pivot via TS_AUTHKEY.", .{});
+                },
+                error.SystemError => {
+                    scoped_log.warn("Pre-pivot tailscale auth setup hit a system error; falling back to post-pivot TS_AUTHKEY", .{});
+                },
+            };
+        }
     }
 
     // Container mode: run in mount+PID ns instead of real pivot

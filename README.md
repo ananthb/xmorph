@@ -104,7 +104,7 @@ Supported instructions: `FROM`, `COPY`, `ADD`, `ENV`, `WORKDIR`,
 For pivoting over SSH without losing your connection:
 
 ```sh
-sudo xenomorph pivot --headless --tailscale-authkey tskey-auth-xxxxx
+sudo xenomorph pivot --headless --tailscale.authkey tskey-auth-xxxxx
 ```
 
 This forks into the background, pivots the root filesystem, and starts
@@ -196,7 +196,7 @@ sudo systemctl edit xenomorph-pivot.service
 ```ini
 [Service]
 ExecStart=
-ExecStart=/usr/local/bin/xenomorph pivot --systemd-mode --force --image alpine:latest --tailscale-authkey tskey-auth-xxxxx
+ExecStart=/usr/local/bin/xenomorph pivot --systemd-mode --force --image alpine:latest --tailscale.authkey tskey-auth-xxxxx
 ```
 
 The `--systemd-mode` flag skips init coordination and process termination
