@@ -29,8 +29,12 @@ arguments that would otherwise be interpreted as flags.`,
 			if err := cfg.Validate(cmd.ErrOrStderr()); err != nil {
 				return err
 			}
+			if cfg.DryRun {
+				printDryRun(cmd.OutOrStdout(), &cfg)
+				return nil
+			}
 			fmt.Fprintf(cmd.ErrOrStderr(),
-				"xmorph pivot: %v — config parsing works, runtime arrives in M3/M5.\n",
+				"xmorph pivot: %v — runtime arrives in M5.\n",
 				errNotImplemented)
 			return errNotImplemented
 		},
