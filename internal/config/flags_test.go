@@ -27,8 +27,8 @@ func parsePivot(t *testing.T, args []string, env map[string]string) Config {
 	return cfg
 }
 
-func boolPtr(b bool) *bool       { return &b }
-func u16Ptr(v uint16) *uint16    { return &v }
+func boolPtr(b bool) *bool    { return &b }
+func u16Ptr(v uint16) *uint16 { return &v }
 
 func TestParsePivotDefaults(t *testing.T) {
 	cfg := parsePivot(t, nil, nil)
@@ -93,9 +93,9 @@ func TestParsePivotImpliedFlags(t *testing.T) {
 
 func TestParsePivotSSHEnable(t *testing.T) {
 	cases := []struct {
-		name   string
-		args   []string
-		want   bool
+		name     string
+		args     []string
+		want     bool
 		wantPort *uint16
 	}{
 		{"unset", nil, false, nil},

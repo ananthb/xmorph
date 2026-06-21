@@ -80,9 +80,9 @@ func TestDryRunTailscaleImageLayerTagged(t *testing.T) {
 
 func TestMaskAuthKey(t *testing.T) {
 	cases := map[string]string{
-		"":           "(unset)",
-		"tskey":      "tskey...",
-		"tskey-auth": "tskey-au...",
+		"":                    "(unset)",
+		"tskey":               "tskey...",
+		"tskey-auth":          "tskey-au...",
 		"tskey-auth-abcdefgh": "tskey-au...efgh",
 	}
 	for in, want := range cases {

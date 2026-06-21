@@ -33,9 +33,9 @@ type Config struct {
 
 // SSHConfig describes the in-rootfs SSH setup (dropbear for now).
 type SSHConfig struct {
-	Port            int    `json:"port"`
-	Password        string `json:"password,omitempty"`
-	AuthorizedKeys  string `json:"authorized_keys,omitempty"`
+	Port           int    `json:"port"`
+	Password       string `json:"password,omitempty"`
+	AuthorizedKeys string `json:"authorized_keys,omitempty"`
 }
 
 // TSConfig is the legacy tailscale-via-image schema. Under tsnet we

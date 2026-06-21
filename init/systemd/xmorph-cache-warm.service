@@ -1,0 +1,15 @@
+[Unit]
+Description=xmorph cache pre-warm
+Documentation=https://github.com/ananthb/xmorph
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/xmorph build
+CacheDirectory=xmorph
+RuntimeDirectory=xmorph
+TimeoutStartSec=infinity
+
+[Install]
+WantedBy=multi-user.target

@@ -1,5 +1,5 @@
 {
-  description = "Xenomorph - Linux pivot_root tool for OCI images";
+  description = "xmorph - Linux pivot_root tool for OCI images";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -8,17 +8,9 @@
       url = "github:cachix/git-hooks.nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    runz = {
-      url = "github:ananthb/runz";
-      flake = false;
-    };
-    oci-spec-zig = {
-      url = "github:navidys/oci-spec-zig";
-      flake = false;
-    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, git-hooks, runz, oci-spec-zig }:
+  outputs = { self, nixpkgs, flake-utils, git-hooks }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
@@ -26,112 +18,64 @@
 
         version = if (self ? shortRev) then self.shortRev else "dev";
 
-        # Static build targets (Zig cross-compilation)
-        targets = {
-          x86_64 = "x86_64-linux-musl";
-          aarch64 = "aarch64-linux-musl";
-          armv7 = "arm-linux-musleabihf";
-        };
+        # vendorHash is populated by `nix build` on first run — it will print
+        # the expected hash and you paste it here. lib.fakeHash forces that
+        # error on first build; once set, the value is reproducible.
+        vendorHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
-        # Read dependency hashes from build.zig.zon files so zig --system works.
-        # These must match the .hash fields in build.zig.zon and runz/build.zig.zon.
-        runzHash = "runz-0.1.0-Fz_yRd5GBgCfsupWOqY1LRk7AXS49BlASN0f8pq8WwVF";
-        ociSpecHash = "ocispec-0.4.0-dev-voj0cey1AgDS-1Itn3Xu5AiWtB6cwMddZtDUssOtWrIn";
-
-        # Create a directory structure that zig --system expects:
-        # pkgdir/<hash> → source tree
-        zigDepsDir = pkgs.runCommand "xenomorph-zig-deps" {} ''
-          mkdir -p $out
-          ln -s ${runz} $out/${runzHash}
-          ln -s ${oci-spec-zig} $out/${ociSpecHash}
-        '';
-
-        # Build a static xenomorph for a given target
-        mkXenomorph = name: zigTarget: pkgs.stdenv.mkDerivation {
-          pname = "xenomorph-${name}";
-          inherit version;
-          src = ./.;
-
-          nativeBuildInputs = [ pkgs.zig ];
-
-          dontConfigure = true;
-          dontInstall = true;
-
-          buildPhase = ''
-            runHook preBuild
-            export ZIG_GLOBAL_CACHE_DIR=$(mktemp -d)
-            zig build \
-              --system ${zigDepsDir} \
-              -Doptimize=ReleaseSafe \
-              -Dtarget=${zigTarget} \
-              --prefix $out
-            runHook postBuild
-          '';
-
-          meta = with pkgs.lib; {
-            description = "Linux pivot_root tool for OCI images";
-            homepage = "https://github.com/ananthb/xenomorph";
-            license = licenses.agpl3Only;
-            platforms = platforms.linux;
-            mainProgram = "xenomorph";
-          };
-        };
-
-        # Build a release tarball for a given target
-        mkReleaseTarball = name: xenomorphBuild: pkgs.stdenv.mkDerivation {
-          pname = "xenomorph-release-${name}";
-          inherit version;
-          src = xenomorphBuild;
-
-          nativeBuildInputs = [ pkgs.gnutar pkgs.gzip ];
-
-          buildPhase = ''
-            mkdir -p xenomorph/bin
-            cp $src/bin/xenomorph xenomorph/bin/
-            cp -r ${./.}/init xenomorph/ 2>/dev/null || true
-            cp ${./.}/README.md xenomorph/ 2>/dev/null || echo "No README" > xenomorph/README.md
-            cp ${./.}/LICENSE xenomorph/ 2>/dev/null || true
-          '';
-
-          installPhase = ''
-            mkdir -p $out
-            tar -czvf $out/xenomorph-${name}.tar.gz xenomorph
-          '';
-        };
-
-        # Create builds for all targets
-        xenomorph-x86_64 = mkXenomorph "x86_64" targets.x86_64;
-        xenomorph-aarch64 = mkXenomorph "aarch64" targets.aarch64;
-        xenomorph-armv7 = mkXenomorph "armv7" targets.armv7;
-
-        releaseTarball-x86_64 = mkReleaseTarball "x86_64-linux" xenomorph-x86_64;
-        releaseTarball-aarch64 = mkReleaseTarball "aarch64-linux" xenomorph-aarch64;
-        releaseTarball-armv7 = mkReleaseTarball "armv7-linux" xenomorph-armv7;
-
-        # --- Go rewrite (M1 bootstrap; will replace Zig at M7) ---
-        # vendorHash gets set when we run `nix build .#xmorph-go` for the
-        # first time and Nix prints the expected hash. Leave as the
-        # all-zeros sentinel; CI computes it on first run.
-        xmorph-go = pkgs.buildGoModule {
+        # Build a static xmorph for a given GOARCH (+ optional GOARM).
+        mkXmorph = goarch: goarm: pkgs.buildGoModule {
           pname = "xmorph";
           inherit version;
           src = ./.;
-          vendorHash = lib.fakeHash;
-          env.CGO_ENABLED = "0";
+          inherit vendorHash;
+          env = {
+            CGO_ENABLED = "0";
+            GOOS = "linux";
+            GOARCH = goarch;
+          } // lib.optionalAttrs (goarm != "") { GOARM = goarm; };
           subPackages = [ "cmd/xmorph" ];
           ldflags = [ "-s" "-w" "-X main.version=${version}" ];
-          # Skip tests in the Nix sandbox (they don't need network but
-          # some assume Linux-only paths; the CI runs them via `go test`
-          # separately).
+          # Tests run in CI via `go test`; the nix sandbox can't exercise
+          # the pivot/mount paths anyway.
           doCheck = false;
-          meta = with pkgs.lib; {
-            description = "Linux pivot_root tool for OCI images (Go port, in progress)";
+          meta = with lib; {
+            description = "Linux pivot_root tool for OCI images";
             homepage = "https://github.com/ananthb/xmorph";
             license = licenses.agpl3Only;
             platforms = platforms.linux;
             mainProgram = "xmorph";
           };
         };
+
+        xmorph-x86_64 = mkXmorph "amd64" "";
+        xmorph-aarch64 = mkXmorph "arm64" "";
+        xmorph-armv7 = mkXmorph "arm" "7";
+
+        mkReleaseTarball = name: xmorphBuild: pkgs.stdenv.mkDerivation {
+          pname = "xmorph-release-${name}";
+          inherit version;
+          src = xmorphBuild;
+
+          nativeBuildInputs = [ pkgs.gnutar pkgs.gzip ];
+
+          buildPhase = ''
+            mkdir -p xmorph/bin
+            cp $src/bin/xmorph xmorph/bin/
+            cp -r ${./.}/init xmorph/ 2>/dev/null || true
+            cp ${./.}/README.md xmorph/ 2>/dev/null || echo "No README" > xmorph/README.md
+            cp ${./.}/LICENSE xmorph/ 2>/dev/null || true
+          '';
+
+          installPhase = ''
+            mkdir -p $out
+            tar -czvf $out/xmorph-${name}.tar.gz xmorph
+          '';
+        };
+
+        releaseTarball-x86_64 = mkReleaseTarball "x86_64-linux" xmorph-x86_64;
+        releaseTarball-aarch64 = mkReleaseTarball "aarch64-linux" xmorph-aarch64;
+        releaseTarball-armv7 = mkReleaseTarball "armv7-linux" xmorph-armv7;
 
         pre-commit = git-hooks.lib.${system}.run {
           src = ./.;
@@ -142,45 +86,41 @@
             detect-private-keys.enable = true;
             end-of-file-fixer.enable = true;
             trim-trailing-whitespace.enable = true;
-            zigfmt = {
-              enable = true;
-              name = "zig fmt";
-              entry = "${pkgs.zig}/bin/zig fmt";
-              types = [ "zig" ];
-            };
+            gofmt.enable = true;
+            # govet runs against the host OS; this is a Linux-only project
+            # so it would fail on darwin. CI runs `go vet` for real.
           };
         };
 
       in
       {
         packages = {
-          default = xenomorph-x86_64;
-          xenomorph = xenomorph-x86_64;
+          default = xmorph-x86_64;
+          xmorph = xmorph-x86_64;
 
-          inherit xenomorph-x86_64 xenomorph-aarch64 xenomorph-armv7;
-          inherit xmorph-go;
+          inherit xmorph-x86_64 xmorph-aarch64 xmorph-armv7;
 
           releaseTarball = releaseTarball-x86_64;
           inherit releaseTarball-x86_64 releaseTarball-aarch64 releaseTarball-armv7;
 
           # Build all platforms (writes binaries to ./dist/)
-          build-all = pkgs.writeShellScriptBin "xenomorph-build-all" ''
+          build-all = pkgs.writeShellScriptBin "xmorph-build-all" ''
             set -e
             rm -rf dist
             mkdir -p dist
             echo "Building x86_64..."
-            cp ${xenomorph-x86_64}/bin/xenomorph dist/xenomorph-x86_64-linux
+            cp ${xmorph-x86_64}/bin/xmorph dist/xmorph-x86_64-linux
             echo "Building aarch64..."
-            cp ${xenomorph-aarch64}/bin/xenomorph dist/xenomorph-aarch64-linux
+            cp ${xmorph-aarch64}/bin/xmorph dist/xmorph-aarch64-linux
             echo "Building armv7..."
-            cp ${xenomorph-armv7}/bin/xenomorph dist/xenomorph-armv7-linux
+            cp ${xmorph-armv7}/bin/xmorph dist/xmorph-armv7-linux
             echo ""
             echo "Binaries:"
             ls -lh dist/
           '';
 
-          # Combined release with all artifacts for Garnix
-          release = pkgs.runCommand "xenomorph-${version}-release" {
+          # Combined release: all three tarballs + SHA256SUMS
+          release = pkgs.runCommand "xmorph-${version}-release" {
             nativeBuildInputs = [ pkgs.coreutils ];
           } ''
             mkdir -p $out
@@ -193,147 +133,118 @@
         };
 
         checks = {
-          build = xenomorph-x86_64;
-          build-aarch64 = xenomorph-aarch64;
-          build-armv7 = xenomorph-armv7;
+          build = xmorph-x86_64;
+          build-aarch64 = xmorph-aarch64;
+          build-armv7 = xmorph-armv7;
 
-          test = pkgs.stdenv.mkDerivation {
-            pname = "xenomorph-test";
-            inherit version;
+          test = pkgs.buildGoModule {
+            pname = "xmorph-test";
+            inherit version vendorHash;
             src = ./.;
-
-            nativeBuildInputs = [ pkgs.zig ];
-            dontConfigure = true;
-            dontInstall = true;
-
-            buildPhase = ''
-              export ZIG_GLOBAL_CACHE_DIR=$(mktemp -d)
-              zig build test --system ${zigDepsDir}
-              touch $out
-            '';
+            env.CGO_ENABLED = "0";
+            doCheck = true;
+            # buildGoModule's default check runs `go test ./...`. We only
+            # need the checkPhase output — discard the install artifact.
+            installPhase = "touch $out";
           };
 
-          fmt = pkgs.stdenv.mkDerivation {
-            pname = "xenomorph-fmt";
-            inherit version;
-            src = ./.;
-
-            nativeBuildInputs = [ pkgs.zig ];
-            dontConfigure = true;
-            dontInstall = true;
-
-            buildPhase = ''
-              export ZIG_GLOBAL_CACHE_DIR=$(mktemp -d)
-              zig fmt --check src/ || echo "Format check skipped"
-              touch $out
-            '';
-          };
-
-          # Fuzz corpus
-          fuzz = pkgs.stdenv.mkDerivation {
-            pname = "xenomorph-fuzz";
-            inherit version;
-            src = ./.;
-
-            nativeBuildInputs = [ pkgs.zig ];
-            dontConfigure = true;
-            dontInstall = true;
-
-            buildPhase = ''
-              export ZIG_GLOBAL_CACHE_DIR=$(mktemp -d)
-              zig build fuzz --system ${zigDepsDir}
-              touch $out
-            '';
-          };
+          fmt = pkgs.runCommand "xmorph-fmt" {
+            nativeBuildInputs = [ pkgs.go ];
+          } ''
+            cd ${./.}
+            unformatted=$(gofmt -l .)
+            if [ -n "$unformatted" ]; then
+              echo "gofmt would reformat:"
+              echo "$unformatted"
+              exit 1
+            fi
+            touch $out
+          '';
 
           # NixOS VM test: local rootfs build + cache
           nixos-local = pkgs.testers.nixosTest {
-            name = "xenomorph-local-build";
+            name = "xmorph-local-build";
 
             nodes.machine = { pkgs, lib, ... }: {
               imports = [ self.nixosModules.default ];
 
-              services.xenomorph = {
+              services.xmorph = {
                 enable = true;
-                package = xenomorph-x86_64;
+                package = xmorph-x86_64;
                 images = [ ];
                 warmupBuildCache = true;
               };
 
               # Create a minimal rootfs tarball with busybox
-              systemd.services.xenomorph-test-rootfs = {
-                description = "Create test rootfs for xenomorph";
+              systemd.services.xmorph-test-rootfs = {
+                description = "Create test rootfs for xmorph";
                 wantedBy = [ "multi-user.target" ];
-                before = [ "xenomorph-cache-warm.service" ];
+                before = [ "xmorph-cache-warm.service" ];
                 path = [ pkgs.gnutar pkgs.gzip ];
                 serviceConfig = {
                   Type = "oneshot";
                   RemainAfterExit = true;
                 };
                 script = ''
-                  mkdir -p /tmp/xenomorph-test-rootfs/{bin,sbin,lib,dev,proc,sys,tmp,etc,var,run}
-                  cp ${pkgs.pkgsStatic.busybox}/bin/busybox /tmp/xenomorph-test-rootfs/bin/busybox
-                  ln -sf busybox /tmp/xenomorph-test-rootfs/bin/sh
-                  ln -sf /bin/sh /tmp/xenomorph-test-rootfs/sbin/init
-                  echo "xenomorph-test" > /tmp/xenomorph-test-rootfs/etc/hostname
-                  mkdir -p /var/lib/xenomorph-test
-                  tar czf /var/lib/xenomorph-test/rootfs.tar.gz -C /tmp/xenomorph-test-rootfs .
+                  mkdir -p /tmp/xmorph-test-rootfs/{bin,sbin,lib,dev,proc,sys,tmp,etc,var,run}
+                  cp ${pkgs.pkgsStatic.busybox}/bin/busybox /tmp/xmorph-test-rootfs/bin/busybox
+                  ln -sf busybox /tmp/xmorph-test-rootfs/bin/sh
+                  ln -sf /bin/sh /tmp/xmorph-test-rootfs/sbin/init
+                  echo "xmorph-test" > /tmp/xmorph-test-rootfs/etc/hostname
+                  mkdir -p /var/lib/xmorph-test
+                  tar czf /var/lib/xmorph-test/rootfs.tar.gz -C /tmp/xmorph-test-rootfs .
                 '';
               };
 
-              systemd.services.xenomorph-cache-warm.serviceConfig.ExecStart =
-                lib.mkForce "${xenomorph-x86_64}/bin/xenomorph build --rootfs /var/lib/xenomorph-test/rootfs.tar.gz";
+              systemd.services.xmorph-cache-warm.serviceConfig.ExecStart =
+                lib.mkForce "${xmorph-x86_64}/bin/xmorph build --rootfs /var/lib/xmorph-test/rootfs.tar.gz";
 
               virtualisation.memorySize = 2048;
             };
 
             testScript = ''
               machine.wait_for_unit("multi-user.target")
-              machine.wait_for_unit("xenomorph-test-rootfs.service")
-              machine.succeed("test -f /var/lib/xenomorph-test/rootfs.tar.gz")
-              machine.wait_for_unit("xenomorph-cache-warm.service")
+              machine.wait_for_unit("xmorph-test-rootfs.service")
+              machine.succeed("test -f /var/lib/xmorph-test/rootfs.tar.gz")
+              machine.wait_for_unit("xmorph-cache-warm.service")
             '';
           };
 
           # NixOS VM test: headscale integration (offline, ~2-3 min)
-          # Run: nix build .#checks.x86_64-linux.nixos-headscale -L
           nixos-headscale = import ./nix/tests/headscale.nix {
             inherit pkgs;
             lib = pkgs.lib;
-            xenomorph-package = xenomorph-x86_64;
+            xmorph-package = xmorph-x86_64;
           };
-
-          # NOTE: nixos-registry-pull and nixos-run tests require internet access
-          # and cannot run in the nix sandbox. Run them locally with:
-          #   nix build .#checks.x86_64-linux.nixos-registry-pull
-          #   nix build .#checks.x86_64-linux.nixos-run
-
         };
 
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
-            zig
-            zls
-            valgrind
+            go
+            gopls
+            gotools
+            golangci-lint
             less
           ];
 
           shellHook = ''
             ${pre-commit.shellHook}
             export PAGER="${pkgs.less}/bin/less"
-            echo "Xenomorph development environment"
-            echo "Zig version: $(zig version)"
+            echo "xmorph development environment"
+            echo "Go version: $(go version)"
             echo ""
             echo "Commands:"
-            echo "  nix run .#build-all   # Build binaries for all platforms → dist/"
-            echo "  nix build .#release    # Build release tarballs + checksums → result/"
-            echo "  nix flake check       # Run all checks including NixOS VM test"
+            echo "  go build ./...         # build everything"
+            echo "  go test ./...          # run unit tests"
+            echo "  nix run .#build-all    # cross-compile to dist/"
+            echo "  nix build .#release    # release tarballs + SHA256SUMS"
+            echo "  nix flake check        # all checks + NixOS VM tests"
           '';
         };
       }
     ) // {
-      # NixOS module for xenomorph rescue pivot
+      # NixOS module for xmorph rescue pivot
       nixosModules.default = import ./nix/module.nix;
-      nixosModules.xenomorph = import ./nix/module.nix;
+      nixosModules.xmorph = import ./nix/module.nix;
     };
 }

@@ -106,8 +106,8 @@ type appendStringVar struct {
 	dst *[]string
 }
 
-func (a *appendStringVar) String() string  { return "" }
-func (a *appendStringVar) Type() string    { return "string" }
+func (a *appendStringVar) String() string { return "" }
+func (a *appendStringVar) Type() string   { return "string" }
 func (a *appendStringVar) Set(s string) error {
 	*a.dst = append(*a.dst, s)
 	return nil

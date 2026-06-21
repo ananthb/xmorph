@@ -17,8 +17,8 @@ import (
 //
 //   - .wh.<name>     → delete <name> from earlier layers
 //   - .wh..wh..opq   → opaque-directory marker; delete everything in the
-//                      containing directory that was contributed by
-//                      earlier layers, then apply this layer's contents.
+//     containing directory that was contributed by
+//     earlier layers, then apply this layer's contents.
 const (
 	whiteoutPrefix = ".wh."
 	whiteoutOpaque = ".wh..wh..opq"

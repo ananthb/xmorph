@@ -12,11 +12,11 @@ import (
 
 	"github.com/ananthb/xmorph/internal/config"
 	"github.com/ananthb/xmorph/internal/daemon"
+	"github.com/ananthb/xmorph/internal/helpers"
 	"github.com/ananthb/xmorph/internal/initsys"
 	"github.com/ananthb/xmorph/internal/oci"
 	"github.com/ananthb/xmorph/internal/pivot"
 	"github.com/ananthb/xmorph/internal/postpivot"
-	"github.com/ananthb/xmorph/internal/helpers"
 	"github.com/ananthb/xmorph/internal/process"
 	"github.com/ananthb/xmorph/internal/rootfs"
 	"github.com/ananthb/xmorph/internal/tsnetauth"
@@ -62,6 +62,7 @@ arguments that would otherwise be interpreted as flags.`,
 //  7. Init coordination (unless --no-init-coord / --systemd-mode).
 //  8. Process termination (unless --systemd-mode).
 //  9. Pivot mount sequence + pivot_root.
+//
 // 10. Exec into the new rootfs's /usr/local/bin/xmorph --init <argv>.
 //
 // At any failure before step 9 we abort cleanly; after step 9 the host

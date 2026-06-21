@@ -6,7 +6,27 @@ on:
   pull_request:
 
 jobs:
-  check:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: gofmt -l . | tee /tmp/gofmt.out && test ! -s /tmp/gofmt.out
+      - run: go vet ./...
+      - run: go test ./...
+      - name: Cross-compile (linux/amd64, arm64, arm)
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+        run: |
+          GOARCH=amd64 go build -o /tmp/xmorph-amd64 ./cmd/xmorph
+          GOARCH=arm64 go build -o /tmp/xmorph-arm64 ./cmd/xmorph
+          GOARCH=arm GOARM=7 go build -o /tmp/xmorph-armv7 ./cmd/xmorph
+
+  nix:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

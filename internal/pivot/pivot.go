@@ -17,7 +17,7 @@ type EssentialMount struct {
 	Source string
 	Target string // relative to new_root
 	FSType string
-	Bind   bool   // true = bind mount from source; false = fresh mount of FSType
+	Bind   bool // true = bind mount from source; false = fresh mount of FSType
 }
 
 // EssentialMounts is the list applied by SetupEssentials. Mirrors

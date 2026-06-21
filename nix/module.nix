@@ -1,14 +1,13 @@
 { config, lib, pkgs, ... }:
 
 let
-  cfg = config.services.xenomorph;
+  cfg = config.services.xmorph;
 
   # Common layer args shared between pivot and build
   layerArgs =
     (map (img: "--image ${img}") cfg.images)
     ++ (map (r: "--rootfs ${r}") cfg.rootfs)
     ++ lib.optional cfg.tailscale.enable "--tailscale.enable"
-    ++ lib.optional (cfg.tailscale.enable && cfg.tailscale.image != null) "--tailscale.image=${cfg.tailscale.image}"
     ++ lib.optional (cfg.tailscale.enable && cfg.tailscale.authKeyFile != null)
       "--tailscale.authkey=$(cat ${cfg.tailscale.authKeyFile})"
     ++ lib.optional (cfg.tailscale.enable && cfg.tailscale.server != null) "--tailscale.server=${cfg.tailscale.server}"
@@ -20,12 +19,12 @@ let
     ++ lib.optional cfg.verbose "--verbose";
 
   # Build command for cache pre-warming (no output, just cache)
-  xenomorphBuildArgs = lib.concatStringsSep " " (
+  xmorphBuildArgs = lib.concatStringsSep " " (
     [ "build" ] ++ layerArgs
   );
 
   # Pivot command
-  xenomorphArgs = lib.concatStringsSep " " (
+  xmorphArgs = lib.concatStringsSep " " (
     [ "pivot" "--systemd-mode" "--force" ]
     ++ layerArgs
     ++ lib.optional (cfg.entrypoint != null) "--entrypoint ${cfg.entrypoint}"
@@ -35,12 +34,12 @@ let
   );
 in
 {
-  options.services.xenomorph = {
-    enable = lib.mkEnableOption "xenomorph rescue pivot service";
+  options.services.xmorph = {
+    enable = lib.mkEnableOption "xmorph rescue pivot service";
 
     package = lib.mkOption {
       type = lib.types.package;
-      description = "The xenomorph package to use.";
+      description = "The xmorph package to use.";
     };
 
     images = lib.mkOption {
@@ -92,7 +91,7 @@ in
     };
 
     ssh = {
-      enable = lib.mkEnableOption "Dropbear SSH in the new rootfs";
+      enable = lib.mkEnableOption "SSH in the new rootfs (tsnet-backed)";
 
       port = lib.mkOption {
         type = lib.types.nullOr lib.types.port;
@@ -114,13 +113,7 @@ in
     };
 
     tailscale = {
-      enable = lib.mkEnableOption "Tailscale integration";
-
-      image = lib.mkOption {
-        type = lib.types.nullOr lib.types.str;
-        default = null;
-        description = "Tailscale OCI image override.";
-      };
+      enable = lib.mkEnableOption "Tailscale (tsnet) integration";
 
       authKeyFile = lib.mkOption {
         type = lib.types.nullOr lib.types.path;
@@ -140,15 +133,15 @@ in
       args = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
         default = null;
-        description = "Arguments for 'tailscale up' (default: --ssh --hostname=<host>-xenomorph).";
+        description = "Arguments for 'tailscale up' (default: --ssh --hostname=<host>-xmorph).";
       };
     };
   };
 
   config = lib.mkIf cfg.enable {
-    systemd.services.xenomorph-pivot = {
-      description = "Xenomorph rootfs pivot";
-      documentation = [ "https://github.com/ananthb/xenomorph" ];
+    systemd.services.xmorph-pivot = {
+      description = "xmorph rootfs pivot";
+      documentation = [ "https://github.com/ananthb/xmorph" ];
 
       after = [ "rescue.target" ];
       wants = [ "network-online.target" ];
@@ -159,10 +152,10 @@ in
         Type = "oneshot";
         RemainAfterExit = true;
 
-        ExecStart = "${cfg.package}/bin/xenomorph ${xenomorphArgs}";
+        ExecStart = "${cfg.package}/bin/xmorph ${xmorphArgs}";
 
-        CacheDirectory = "xenomorph";
-        RuntimeDirectory = "xenomorph";
+        CacheDirectory = "xmorph";
+        RuntimeDirectory = "xmorph";
 
         TimeoutStartSec = "infinity";
         Restart = "no";
@@ -172,9 +165,9 @@ in
       };
     };
 
-    systemd.services.xenomorph-cache-warm = lib.mkIf cfg.warmupBuildCache {
-      description = "Xenomorph cache pre-warm";
-      documentation = [ "https://github.com/ananthb/xenomorph" ];
+    systemd.services.xmorph-cache-warm = lib.mkIf cfg.warmupBuildCache {
+      description = "xmorph cache pre-warm";
+      documentation = [ "https://github.com/ananthb/xmorph" ];
 
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
@@ -183,9 +176,9 @@ in
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
-        ExecStart = "${cfg.package}/bin/xenomorph ${xenomorphBuildArgs}";
-        CacheDirectory = "xenomorph";
-        RuntimeDirectory = "xenomorph";
+        ExecStart = "${cfg.package}/bin/xmorph ${xmorphBuildArgs}";
+        CacheDirectory = "xmorph";
+        RuntimeDirectory = "xmorph";
         TimeoutStartSec = "infinity";
         Restart = "no";
       };
