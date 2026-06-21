@@ -1,9 +1,15 @@
 package cli
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
+	"os"
+	"path/filepath"
 
 	"github.com/ananthb/xmorph/internal/config"
+	"github.com/ananthb/xmorph/internal/oci"
+	"github.com/ananthb/xmorph/internal/rootfs"
 	"github.com/spf13/cobra"
 )
 
@@ -21,12 +27,76 @@ the build cache so a later pivot is fast.`,
 			if err := cfg.Validate(cmd.ErrOrStderr()); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.ErrOrStderr(),
-				"xmorph build: %v — config parsing works, runtime arrives in M2.\n",
-				errNotImplemented)
-			return errNotImplemented
+			return runBuild(cmd.Context(), &cfg)
 		},
 	}
 	config.BindBuild(cmd.Flags(), &cfg)
 	return cmd
+}
+
+// runBuild is the M2 entry point. It builds the rootfs into cfg.WorkDir,
+// saves a cache entry at {cache_dir}/builds/{key}/, and (with -o) writes
+// an OCI layout to the requested path.
+func runBuild(ctx context.Context, cfg *config.Config) error {
+	_ = ctx // M2 doesn't use the context; future remote-pull cancellation does
+
+	key := rootfs.ComputeCacheKey(cfg.Layers)
+	cachePath := filepath.Join(cfg.CacheDir, "builds", key)
+
+	if !cfg.NoCache && cacheHit(cachePath) {
+		slog.Info("cache hit", "key", key, "path", cachePath)
+		if cfg.Output != "" {
+			return copyLayoutDir(cachePath, cfg.Output)
+		}
+		return nil
+	}
+
+	if err := os.RemoveAll(cfg.WorkDir); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("clean work dir: %w", err)
+	}
+	if err := os.MkdirAll(cfg.WorkDir, 0o755); err != nil {
+		return fmt.Errorf("create work dir: %w", err)
+	}
+
+	slog.Info("building rootfs", "layers", len(cfg.Layers), "target", cfg.WorkDir)
+	result, err := rootfs.Build(cfg.Layers, cfg.WorkDir)
+	if err != nil {
+		return fmt.Errorf("build rootfs: %w", err)
+	}
+	slog.Info("rootfs built", "layers", result.LayerCount)
+
+	img, err := composeImage(cfg.WorkDir, result.Config)
+	if err != nil {
+		return fmt.Errorf("compose OCI image: %w", err)
+	}
+
+	if err := os.MkdirAll(cachePath, 0o755); err != nil {
+		return fmt.Errorf("create cache dir: %w", err)
+	}
+	digest, err := oci.WriteLayout(cachePath, img)
+	if err != nil {
+		return fmt.Errorf("write cache layout: %w", err)
+	}
+	slog.Info("cache saved", "key", key, "digest", digest.String())
+
+	if cfg.Output != "" {
+		if _, err := oci.WriteLayout(cfg.Output, img); err != nil {
+			return fmt.Errorf("write OCI layout %s: %w", cfg.Output, err)
+		}
+		slog.Info("OCI layout written", "path", cfg.Output)
+	}
+
+	if cfg.RootfsOutput != "" {
+		if err := writeRootfsTarball(cfg.WorkDir, cfg.RootfsOutput); err != nil {
+			return fmt.Errorf("write rootfs tarball: %w", err)
+		}
+		slog.Info("rootfs tarball written", "path", cfg.RootfsOutput)
+	}
+
+	return nil
+}
+
+func cacheHit(path string) bool {
+	_, err := os.Stat(filepath.Join(path, "index.json"))
+	return err == nil
 }
