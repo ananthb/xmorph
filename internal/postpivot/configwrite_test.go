@@ -14,6 +14,7 @@ func TestWriteConfigRoundTrip(t *testing.T) {
 		RebootOnFailure:        true,
 		WatchdogTimeoutSeconds: 300,
 		KeepOldRoot:            "/mnt/oldroot",
+		LogPersistDir:          "/mnt/oldroot/var/log/xmorph",
 		SSH: &SSHConfig{
 			Port:           22,
 			AuthorizedKeys: "ssh-ed25519 AAAA",
@@ -47,6 +48,9 @@ func TestWriteConfigRoundTrip(t *testing.T) {
 	if got.KeepOldRoot != "/mnt/oldroot" {
 		t.Errorf("KeepOldRoot = %q, want /mnt/oldroot", got.KeepOldRoot)
 	}
+	if got.LogPersistDir != "/mnt/oldroot/var/log/xmorph" {
+		t.Errorf("LogPersistDir = %q", got.LogPersistDir)
+	}
 	if got.SSH == nil || got.SSH.Port != 22 {
 		t.Errorf("SSH = %+v", got.SSH)
 	}
@@ -66,7 +70,7 @@ func TestWriteConfigOmitsEmptyOptional(t *testing.T) {
 	}
 	data, _ := os.ReadFile(filepath.Join(dir, ConfigPath))
 	s := string(data)
-	for _, omitted := range []string{"\"ssh\"", "\"tailscale\"", "\"entrypoint\"", "\"watchdog_timeout_seconds\"", "\"keep_old_root\""} {
+	for _, omitted := range []string{"\"ssh\"", "\"tailscale\"", "\"entrypoint\"", "\"watchdog_timeout_seconds\"", "\"keep_old_root\"", "\"log_persist_dir\""} {
 		if contains := indexOfStr(s, omitted) >= 0; contains {
 			t.Errorf("expected %q to be omitted; got %s", omitted, s)
 		}

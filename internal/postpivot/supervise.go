@@ -3,6 +3,7 @@ package postpivot
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -22,6 +23,8 @@ type SuperviseOptions struct {
 	RebootOnFailure bool
 	// OldRootPath is unmounted before reboot; empty skips.
 	OldRootPath string
+	// LogWriter, if non-nil, tees the child's stdout + stderr.
+	LogWriter io.Writer
 }
 
 // Supervise spawns Argv as a child process and forwards
@@ -40,6 +43,10 @@ func Supervise(opts SuperviseOptions) (exitCode int, err error) {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	if opts.LogWriter != nil {
+		cmd.Stdout = io.MultiWriter(os.Stdout, opts.LogWriter)
+		cmd.Stderr = io.MultiWriter(os.Stderr, opts.LogWriter)
+	}
 	if opts.Env != nil {
 		cmd.Env = opts.Env
 	}

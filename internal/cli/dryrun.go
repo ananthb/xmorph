@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 
 	"github.com/ananthb/xmorph/internal/config"
@@ -40,6 +41,9 @@ func printDryRun(w io.Writer, cfg *config.Config) {
 	fmt.Fprintf(w, "Timeout: %ds\n", cfg.Timeout)
 	if cfg.WatchdogTimeout > 0 {
 		fmt.Fprintf(w, "Watchdog: %s (reset if hung; /dev/watchdog or userspace timer)\n", cfg.WatchdogTimeout)
+	}
+	if cfg.LogPersistPath != "" {
+		fmt.Fprintf(w, "Persistent logs: %s\n", filepath.Join("/", cfg.LogPersistDevice, cfg.LogPersistPath))
 	}
 	if cfg.Headless {
 		fmt.Fprintf(w, "Mode: headless (will fork and detach, log to /var/log/xmorph.log)\n")

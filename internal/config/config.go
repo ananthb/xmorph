@@ -46,14 +46,15 @@ type Layer struct {
 
 // Default values mirrored from src/config.zig:22-105 with paths renamed to xmorph.
 const (
-	DefaultImage        = "docker.io/library/alpine:latest"
-	DefaultEntrypoint   = "/bin/sh"
-	DefaultKeepOldRoot  = "/mnt/oldroot"
-	DefaultTimeout      = 30
-	DefaultCacheDir     = "/var/cache/xmorph"
-	DefaultWorkDir      = "/run/xmorph/rootfs"
-	DefaultLogDir       = "/var/log"
-	DefaultTailscaleImg = "docker.io/tailscale/tailscale:latest"
+	DefaultImage          = "docker.io/library/alpine:latest"
+	DefaultEntrypoint     = "/bin/sh"
+	DefaultKeepOldRoot    = "/mnt/oldroot"
+	DefaultTimeout        = 30
+	DefaultCacheDir       = "/var/cache/xmorph"
+	DefaultLogPersistPath = "/var/log/xmorph"
+	DefaultWorkDir        = "/run/xmorph/rootfs"
+	DefaultLogDir         = "/var/log"
+	DefaultTailscaleImg   = "docker.io/tailscale/tailscale:latest"
 )
 
 // Config holds the parsed CLI configuration. Field order and zero-values
@@ -97,6 +98,12 @@ type Config struct {
 	// it. Prefers /dev/watchdog (kernel), falls back to a userspace timer.
 	WatchdogTimeout time.Duration
 
+	// LogPersistDevice + LogPersistPath compose the pre-pivot absolute
+	// path where xmorph writes durable logs. Post-pivot the same path
+	// is visible under KeepOldRoot. Empty LogPersistPath disables.
+	LogPersistDevice string
+	LogPersistPath   string
+
 	// SSH: tri-state Enable (nil = auto from other ssh.* flags), explicit
 	// fields below.
 	SSHEnable         *bool
@@ -121,6 +128,7 @@ func New() Config {
 		KeepOldRoot:    DefaultKeepOldRoot,
 		Timeout:        DefaultTimeout,
 		CacheDir:       DefaultCacheDir,
+		LogPersistPath: DefaultLogPersistPath,
 		WorkDir:        DefaultWorkDir,
 		LogDir:         DefaultLogDir,
 		TailscaleImage: DefaultTailscaleImg,

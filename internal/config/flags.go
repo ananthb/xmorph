@@ -72,6 +72,8 @@ func bindPivotOnly(fs *pflag.FlagSet, cfg *Config) {
 	fs.BoolVar(&cfg.Headless, "headless", false, "detach from terminal (implies --force)")
 	fs.BoolVar(&cfg.KeepFirewall, "keep-firewall", false, "keep existing firewall rules (default: flush before starting services)")
 	fs.DurationVar(&cfg.WatchdogTimeout, "watchdog-timeout", 0, "reset the box if the pivoted entrypoint hangs longer than this (0: disabled; uses /dev/watchdog when available, otherwise a userspace timer)")
+	fs.StringVar(&cfg.LogPersistDevice, "log-persist-device", "", "pre-pivot mount path holding the log directory (empty: old root)")
+	fs.StringVar(&cfg.LogPersistPath, "log-persist-path", DefaultLogPersistPath, "path under --log-persist-device where xmorph writes durable logs (empty: disabled)")
 }
 
 func bindBuildOnly(fs *pflag.FlagSet, cfg *Config) {
