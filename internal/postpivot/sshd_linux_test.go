@@ -26,7 +26,7 @@ func serveSSHTest(t *testing.T, cfg *SSHConfig) string {
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- serveSSH(ctx, ln, cfg) }()
+	go func() { done <- serveSSH(ctx, []net.Listener{ln}, cfg) }()
 	t.Cleanup(func() {
 		cancel()
 		select {
@@ -148,7 +148,7 @@ func TestSSHNoAuthConfiguredRefuses(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	err = serveSSH(ctx, ln, &SSHConfig{}) // no keys, no password
+	err = serveSSH(ctx, []net.Listener{ln}, &SSHConfig{}) // no keys, no password
 	if err == nil || !strings.Contains(err.Error(), "no auth method") {
 		t.Errorf("serveSSH err = %v, want 'no auth method'", err)
 	}
@@ -165,6 +165,30 @@ func TestParseAuthorizedKeys(t *testing.T) {
 	}
 	if len(keys) != 2 {
 		t.Errorf("got %d keys, want 2", len(keys))
+	}
+}
+
+type fakeTailnet struct{}
+
+func (fakeTailnet) Listen(network, addr string) (net.Listener, error) {
+	return net.Listen(network, "127.0.0.1:0")
+}
+
+func TestStartSSHServerAddsTailnetListener(t *testing.T) {
+	_, authorized := genClientKey(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- StartSSHServer(ctx, &SSHConfig{AuthorizedKeys: authorized}, fakeTailnet{}) }()
+	// Give both listeners a moment to bind, then shut down.
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("StartSSHServer: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Error("StartSSHServer did not exit")
 	}
 }
 

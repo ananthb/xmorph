@@ -8,52 +8,49 @@ import (
 	"tailscale.com/tsnet"
 )
 
-// PostPivotOptions configures PostPivot.
+// PostPivotOptions configures NewPostPivotServer.
 type PostPivotOptions struct {
-	// Hostname must match what PreAuth used; reusing the persisted
-	// state requires the same hostname.
+	// Hostname must match what PreAuth used.
 	Hostname string
-	// SSHAddr is the bind address for Tailscale SSH (default ":22").
-	SSHAddr string
 }
 
-// PostPivot is invoked from `xmorph --init` after the pivot. It opens
-// tsnet at /var/lib/tailscale (the path the persisted PreAuth state
-// landed at) and listens for Tailscale SSH on SSHAddr. AuthKey is empty
-// — the state on disk has us already authenticated.
-//
-// Blocks until ctx is cancelled or the listener errors. The caller
-// runs this in a goroutine alongside Supervise.
-func PostPivot(ctx context.Context, opts PostPivotOptions) error {
-	addr := opts.SSHAddr
-	if addr == "" {
-		addr = ":22"
-	}
-
+// NewPostPivotServer opens tsnet from the state persisted by PreAuth
+// and brings the node up on the tailnet. Caller owns Close.
+func NewPostPivotServer(ctx context.Context, opts PostPivotOptions) (*tsnet.Server, error) {
 	srv := &tsnet.Server{
 		Dir:      "/var/lib/tailscale",
 		Hostname: opts.Hostname,
 	}
-	defer srv.Close()
-
 	if _, err := srv.Up(ctx); err != nil {
-		return fmt.Errorf("post-pivot tsnet up: %w", err)
+		srv.Close()
+		return nil, fmt.Errorf("post-pivot tsnet up: %w", err)
 	}
+	return srv, nil
+}
 
-	// ListenSSH wires the in-process Tailscale SSH server to the
-	// tailnet listener (tsnet.Server.ListenSSH in v1.100.0). The
-	// returned net.Listener serves SSH connections — accepting and
-	// closing them is handled internally by tsnet.
+// ServeSSH runs Tailscale-native SSH (tsnet ListenSSH). Blocks until
+// ctx is cancelled. addr empty defaults to ":22".
+func ServeSSH(ctx context.Context, srv *tsnet.Server, addr string) error {
+	if addr == "" {
+		addr = ":22"
+	}
 	ln, err := srv.ListenSSH(addr)
 	if err != nil {
 		return fmt.Errorf("tsnet ListenSSH %s: %w", addr, err)
 	}
 	defer ln.Close()
-
-	slog.Info("tsnet SSH up", "hostname", opts.Hostname, "addr", addr)
-
-	// Block until ctx is done; the SSH listener runs in the background
-	// inside tsnet. Closing srv on defer tears down the listener.
+	slog.Info("tsnet SSH up", "hostname", srv.Hostname, "addr", addr)
 	<-ctx.Done()
 	return ctx.Err()
+}
+
+// PostPivot preserves the old one-call API: create + serve. Kept for
+// callers that don't need the *tsnet.Server for their own listeners.
+func PostPivot(ctx context.Context, opts PostPivotOptions) error {
+	srv, err := NewPostPivotServer(ctx, opts)
+	if err != nil {
+		return err
+	}
+	defer srv.Close()
+	return ServeSSH(ctx, srv, ":22")
 }

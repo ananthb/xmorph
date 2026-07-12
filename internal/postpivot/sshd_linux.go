@@ -22,13 +22,18 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// StartSSHServer runs an SSH server for the post-pivot rescue rootfs.
-// Blocks until ctx is cancelled or the listener errors. Public-key
-// (from cfg.AuthorizedKeys, OpenSSH `authorized_keys` format) and
-// password (cfg.Password) auth are both accepted when configured; the
-// server rejects clients when neither is set. Sessions run `/bin/sh`
-// as root — the pivoted rootfs has no user database.
-func StartSSHServer(ctx context.Context, cfg *SSHConfig) error {
+// TailnetListener is anything that can hand out net.Listeners on a
+// user-space tailnet interface (e.g. *tsnet.Server).
+type TailnetListener interface {
+	Listen(network, addr string) (net.Listener, error)
+}
+
+// StartSSHServer serves an SSH server on kernel :port and, when
+// tailnet is non-nil, additionally on the tailnet interface. Pubkey
+// (cfg.AuthorizedKeys, one per line) and password (cfg.Password) auth
+// are both accepted when configured; server refuses to start with
+// neither. Sessions run /bin/sh as root.
+func StartSSHServer(ctx context.Context, cfg *SSHConfig, tailnet TailnetListener) error {
 	if cfg == nil {
 		return errors.New("sshd: nil SSH config")
 	}
@@ -36,30 +41,66 @@ func StartSSHServer(ctx context.Context, cfg *SSHConfig) error {
 	if port == 0 {
 		port = 22
 	}
-	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
-	if err != nil {
-		return fmt.Errorf("sshd: listen :%d: %w", port, err)
+	addr := fmt.Sprintf(":%d", port)
+
+	var listeners []net.Listener
+	if kln, err := net.Listen("tcp", addr); err == nil {
+		listeners = append(listeners, kln)
+	} else {
+		slog.Warn("sshd: kernel listen failed", "err", err)
 	}
-	return serveSSH(ctx, ln, cfg)
+	if tailnet != nil {
+		if tln, err := tailnet.Listen("tcp", addr); err == nil {
+			listeners = append(listeners, tln)
+		} else {
+			slog.Warn("sshd: tailnet listen failed", "err", err)
+		}
+	}
+	if len(listeners) == 0 {
+		return fmt.Errorf("sshd: no listeners could bind :%d", port)
+	}
+	return serveSSH(ctx, listeners, cfg)
 }
 
-// serveSSH is the injectable core so tests can pass a random-port
-// listener. Closes ln on exit.
-func serveSSH(ctx context.Context, ln net.Listener, cfg *SSHConfig) error {
-	defer ln.Close()
-
+// serveSSH is the injectable core so tests can pass random-port
+// listeners. Closes every listener on exit.
+func serveSSH(ctx context.Context, listeners []net.Listener, cfg *SSHConfig) error {
 	sc, err := buildServerConfig(cfg)
 	if err != nil {
+		for _, ln := range listeners {
+			ln.Close()
+		}
 		return err
 	}
 
 	go func() {
 		<-ctx.Done()
-		ln.Close()
+		for _, ln := range listeners {
+			ln.Close()
+		}
 	}()
 
-	slog.Info("sshd: listening", "addr", ln.Addr())
+	var wg sync.WaitGroup
+	errCh := make(chan error, len(listeners))
+	for _, ln := range listeners {
+		slog.Info("sshd: listening", "addr", ln.Addr())
+		wg.Add(1)
+		go func(ln net.Listener) {
+			defer wg.Done()
+			errCh <- acceptLoop(ctx, ln, sc)
+		}(ln)
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
+func acceptLoop(ctx context.Context, ln net.Listener, sc *ssh.ServerConfig) error {
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	for {
@@ -68,7 +109,7 @@ func serveSSH(ctx context.Context, ln net.Listener, cfg *SSHConfig) error {
 			if ctx.Err() != nil {
 				return nil
 			}
-			return fmt.Errorf("sshd: accept: %w", err)
+			return fmt.Errorf("sshd: accept on %s: %w", ln.Addr(), err)
 		}
 		wg.Add(1)
 		go func() {
