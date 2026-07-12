@@ -229,6 +229,7 @@ func buildPostpivotConfig(cfg *config.Config, entrypoint string, entryArgs []str
 		FlushFirewall:          !cfg.KeepFirewall,
 		RebootOnFailure:        true,
 		WatchdogTimeoutSeconds: int(cfg.WatchdogTimeout / time.Second),
+		KeepOldRoot:            cfg.KeepOldRoot,
 		Entrypoint:             append([]string{entrypoint}, entryArgs...),
 	}
 	if cfg.SSHEnabled() {

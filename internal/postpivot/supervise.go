@@ -24,6 +24,11 @@ type SuperviseOptions struct {
 	// PetInterval() > 0 arms a periodic ticker; signals also ping.
 	// Nil, kernel-path, and no-op stubs are safe.
 	Watchdog *Watchdog
+	// OldRootPath, if non-empty, is unmounted before rebootSystem
+	// calls LINUX_REBOOT_CMD_RESTART — otherwise the journal on the
+	// old root gets left dirty and next boot fsck-repairs (or worse,
+	// drops into emergency.target).
+	OldRootPath string
 }
 
 // Supervise spawns Argv as a child process and forwards
@@ -81,7 +86,7 @@ func Supervise(opts SuperviseOptions) (exitCode int, err error) {
 			reapOrphans()
 			code := exitStatusFrom(cmd, err)
 			if opts.RebootOnFailure && code != 0 {
-				rebootSystem()
+				rebootSystem(opts.OldRootPath)
 			}
 			return code, nil
 		}
@@ -119,10 +124,11 @@ func exitStatusFrom(cmd *exec.Cmd, waitErr error) int {
 	return 0
 }
 
-// rebootSystem flushes filesystem buffers and issues LINUX_REBOOT_CMD_RESTART.
-// Sleeps 5 seconds before rebooting so log lines have time to flush.
+// rebootSystem unmounts the old root (if oldRoot is non-empty), flushes
+// filesystem buffers, and issues LINUX_REBOOT_CMD_RESTART. Sleeps 5
+// seconds before rebooting so log lines have time to flush.
 // Implemented in arch-specific files so we can call the right syscall.
-func rebootSystem() {
+func rebootSystem(oldRoot string) {
 	time.Sleep(5 * time.Second)
-	doReboot() // platform-specific (devices.go / devices_other.go)
+	doReboot(oldRoot)
 }

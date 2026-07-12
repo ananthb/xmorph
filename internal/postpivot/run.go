@@ -79,10 +79,15 @@ func Run(argv []string) int {
 	}
 
 	rebootOnFailure := cfg == nil || cfg.RebootOnFailure
+	var oldRoot string
+	if cfg != nil {
+		oldRoot = cfg.KeepOldRoot
+	}
 	code, err := Supervise(SuperviseOptions{
 		Argv:            supervised,
 		RebootOnFailure: rebootOnFailure,
 		Watchdog:        wd,
+		OldRootPath:     oldRoot,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "xmorph --init: %v\n", err)

@@ -28,11 +28,18 @@ type Config struct {
 	// WatchdogTimeoutSeconds arms /dev/watchdog (or a userspace timer
 	// fallback) that resets the box if the post-pivot supervisor hangs
 	// longer than this. 0 disables it.
-	WatchdogTimeoutSeconds int        `json:"watchdog_timeout_seconds,omitempty"`
-	SSH                    *SSHConfig `json:"ssh,omitempty"`
-	Tailscale              *TSConfig  `json:"tailscale,omitempty"`
-	Entrypoint             []string   `json:"entrypoint,omitempty"`
-	Command                []string   `json:"command,omitempty"`
+	WatchdogTimeoutSeconds int `json:"watchdog_timeout_seconds,omitempty"`
+	// KeepOldRoot is the path where the pre-pivot root remains mounted
+	// (default /mnt/oldroot). Consumed by the reboot path so we can
+	// unmount cleanly before LINUX_REBOOT_CMD_RESTART — the kernel
+	// restart doesn't run any userspace shutdown, so a journaled fs on
+	// the old root would otherwise be left dirty. Empty means the pivot
+	// step already unmounted it.
+	KeepOldRoot string     `json:"keep_old_root,omitempty"`
+	SSH         *SSHConfig `json:"ssh,omitempty"`
+	Tailscale   *TSConfig  `json:"tailscale,omitempty"`
+	Entrypoint  []string   `json:"entrypoint,omitempty"`
+	Command     []string   `json:"command,omitempty"`
 }
 
 // SSHConfig describes the in-rootfs SSH setup (dropbear for now).
