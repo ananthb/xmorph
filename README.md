@@ -110,6 +110,24 @@ For a fully custom image, build one out-of-band (`podman build`, Nix
 sudo xmorph pivot --image ghcr.io/you/your-installer:tag
 ```
 
+### Auto-reset on hang
+
+If the pivoted rootfs deadlocks (hung network, DNS timeout on `apk add`,
+etc.) the box is unreachable and unrecoverable without a hardware reset.
+`--watchdog-timeout` arms `/dev/watchdog` before running the entrypoint;
+the kernel resets the box if xmorph stops petting it, restoring the
+original OS.
+
+```sh
+sudo xmorph pivot --image alpine --rootfs ./overlay/ \
+  --entrypoint /install.sh \
+  --watchdog-timeout 5m
+```
+
+Falls back to a userspace `time.Timer` that calls `reboot(2)` when
+`/dev/watchdog` isn't available (e.g. VMs without softdog). The kernel
+path also survives a wedged Go runtime; the userspace fallback doesn't.
+
 ### Headless mode with Tailscale
 
 For pivoting over SSH without losing your connection:

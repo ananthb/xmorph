@@ -183,6 +183,26 @@ keep it.
 - Requires at least one of `--tailscale.authkey` or `--ssh.port` — without
   a way to reach the rescued box, you'd lock yourself out
 
+## Auto-reset on hang
+
+If the entrypoint wedges (hung `apk add`, DNS timeout, kernel deadlock)
+the pivoted rootfs may be unreachable. `--watchdog-timeout` arms
+`/dev/watchdog` before the entrypoint runs and pets it from a goroutine;
+if anything stops that goroutine the kernel resets and the box comes
+back on the original OS.
+
+```sh
+sudo xmorph pivot --image alpine --rootfs ./overlay/ \
+  --entrypoint /install.sh \
+  --watchdog-timeout 5m --headless \
+  --tailscale.authkey tskey-auth-xxxxx
+```
+
+Without `/dev/watchdog` xmorph falls back to a `time.Timer` that calls
+`reboot(2)` — narrower coverage (won't fire on a wedged Go runtime) but
+still catches "install script hangs on network," which is the common
+failure mode. Sub-second timeouts are rejected.
+
 ## Recovery and exit
 
 - **Back to the old OS**: `reboot`. The tmpfs is lost; the system comes
