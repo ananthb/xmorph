@@ -20,19 +20,13 @@ func CleanupOldRoot(oldRoot string) ([]string, error) {
 	return unmountUnder(oldRoot, unix.MNT_DETACH)
 }
 
-// UnmountOldRoot performs a blocking unmount of every mount under
-// oldRoot, deepest first. Unlike CleanupOldRoot (which uses MNT_DETACH
-// and returns immediately), this waits for pending I/O to drain and
-// falls back to MNT_FORCE if the mount is busy. Use before rebooting
-// so journaled filesystems on the old root close cleanly.
+// UnmountOldRoot is CleanupOldRoot's blocking sibling: normal unmount
+// with an MNT_FORCE retry. Use before reboot so journals close cleanly.
 func UnmountOldRoot(oldRoot string) ([]string, error) {
 	failed, err := unmountUnder(oldRoot, 0)
 	if err != nil || len(failed) == 0 {
 		return failed, err
 	}
-	// One retry with MNT_FORCE for anything still busy. We've already
-	// synced from the caller; on a reboot path losing a straggling
-	// write is preferable to hanging until the watchdog fires.
 	return unmountUnder(oldRoot, unix.MNT_FORCE)
 }
 
@@ -48,12 +42,7 @@ func unmountUnder(oldRoot string, flags int) ([]string, error) {
 			under = append(under, m)
 		}
 	}
-
-	// Deepest first: longer paths come before their parents so the
-	// leaf unmount doesn't fight with submounts still attached.
-	sort.Slice(under, func(i, j int) bool {
-		return len(under[i]) > len(under[j])
-	})
+	sort.Slice(under, func(i, j int) bool { return len(under[i]) > len(under[j]) })
 
 	var failed []string
 	for _, m := range under {

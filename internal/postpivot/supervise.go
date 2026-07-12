@@ -21,13 +21,9 @@ type SuperviseOptions struct {
 	// so the original OS comes back. Mirrors src/xenomorph-init.zig:336-352.
 	RebootOnFailure bool
 	// Watchdog, if non-nil, is petted on each supervisor iteration.
-	// PetInterval() > 0 arms a periodic ticker; signals also ping.
 	// Nil, kernel-path, and no-op stubs are safe.
 	Watchdog *Watchdog
-	// OldRootPath, if non-empty, is unmounted before rebootSystem
-	// calls LINUX_REBOOT_CMD_RESTART — otherwise the journal on the
-	// old root gets left dirty and next boot fsck-repairs (or worse,
-	// drops into emergency.target).
+	// OldRootPath is unmounted before reboot; empty skips.
 	OldRootPath string
 }
 
@@ -124,10 +120,8 @@ func exitStatusFrom(cmd *exec.Cmd, waitErr error) int {
 	return 0
 }
 
-// rebootSystem unmounts the old root (if oldRoot is non-empty), flushes
-// filesystem buffers, and issues LINUX_REBOOT_CMD_RESTART. Sleeps 5
-// seconds before rebooting so log lines have time to flush.
-// Implemented in arch-specific files so we can call the right syscall.
+// rebootSystem sleeps 5s (for log flush), then hands off to the
+// platform doReboot.
 func rebootSystem(oldRoot string) {
 	time.Sleep(5 * time.Second)
 	doReboot(oldRoot)

@@ -25,16 +25,11 @@ const BinaryPath = "/usr/local/bin/xmorph"
 type Config struct {
 	FlushFirewall   bool `json:"flush_firewall"`
 	RebootOnFailure bool `json:"reboot_on_failure"`
-	// WatchdogTimeoutSeconds arms /dev/watchdog (or a userspace timer
-	// fallback) that resets the box if the post-pivot supervisor hangs
-	// longer than this. 0 disables it.
+	// WatchdogTimeoutSeconds; 0 disables.
 	WatchdogTimeoutSeconds int `json:"watchdog_timeout_seconds,omitempty"`
-	// KeepOldRoot is the path where the pre-pivot root remains mounted
-	// (default /mnt/oldroot). Consumed by the reboot path so we can
-	// unmount cleanly before LINUX_REBOOT_CMD_RESTART — the kernel
-	// restart doesn't run any userspace shutdown, so a journaled fs on
-	// the old root would otherwise be left dirty. Empty means the pivot
-	// step already unmounted it.
+	// KeepOldRoot is the pre-pivot root's mount point (default
+	// /mnt/oldroot). Reboot path unmounts it before restart. Empty
+	// means the pivot step already unmounted.
 	KeepOldRoot string     `json:"keep_old_root,omitempty"`
 	SSH         *SSHConfig `json:"ssh,omitempty"`
 	Tailscale   *TSConfig  `json:"tailscale,omitempty"`
