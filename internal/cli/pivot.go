@@ -150,6 +150,19 @@ func runPivot(ctx context.Context, cfg *config.Config, stdout interface {
 		slog.Info("watchdog pre-pivot check ok")
 	}
 
+	// Persistent log dir pre-check. Resolved path lives on the pre-pivot
+	// root today; post-pivot it moves under KeepOldRoot.
+	if cfg.LogPersistPath != "" {
+		if cfg.KeepOldRoot == "" {
+			return fmt.Errorf("--log-persist-path requires --keep-old-root (need the old root mounted post-pivot)")
+		}
+		prePivotDir := filepath.Join("/", cfg.LogPersistDevice, cfg.LogPersistPath)
+		if err := ensureLogDirWritable(prePivotDir); err != nil {
+			return fmt.Errorf("--log-persist-path %s: %w", prePivotDir, err)
+		}
+		slog.Info("log-persist pre-pivot check ok", "path", prePivotDir)
+	}
+
 	// Memory headroom: warn before we commit to the pivot.
 	// (sysmem usage will be wired through when M5's RAM telemetry is
 	// surfaced via the slog output — for now we just verify the file
@@ -241,6 +254,9 @@ func buildPostpivotConfig(cfg *config.Config, entrypoint string, entryArgs []str
 		KeepOldRoot:            cfg.KeepOldRoot,
 		Entrypoint:             append([]string{entrypoint}, entryArgs...),
 	}
+	if cfg.LogPersistPath != "" && cfg.KeepOldRoot != "" {
+		pc.LogPersistDir = filepath.Join(cfg.KeepOldRoot, cfg.LogPersistDevice, cfg.LogPersistPath)
+	}
 	if cfg.SSHEnabled() {
 		ssh := &postpivot.SSHConfig{
 			Password:       cfg.SSHPassword,
@@ -293,6 +309,20 @@ func runContain(cfg *config.Config) error {
 		Args:       entryArgs,
 		Env:        env,
 	})
+}
+
+// ensureLogDirWritable makes dir and confirms we can write into it.
+func ensureLogDirWritable(dir string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
+	probe, err := os.CreateTemp(dir, ".xmorph-probe-")
+	if err != nil {
+		return fmt.Errorf("write probe: %w", err)
+	}
+	name := probe.Name()
+	probe.Close()
+	return os.Remove(name)
 }
 
 // resolveEntrypoint picks the effective entrypoint + args + env from the

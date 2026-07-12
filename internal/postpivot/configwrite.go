@@ -30,11 +30,14 @@ type Config struct {
 	// KeepOldRoot is the pre-pivot root's mount point (default
 	// /mnt/oldroot). Reboot path unmounts it before restart. Empty
 	// means the pivot step already unmounted.
-	KeepOldRoot string     `json:"keep_old_root,omitempty"`
-	SSH         *SSHConfig `json:"ssh,omitempty"`
-	Tailscale   *TSConfig  `json:"tailscale,omitempty"`
-	Entrypoint  []string   `json:"entrypoint,omitempty"`
-	Command     []string   `json:"command,omitempty"`
+	KeepOldRoot string `json:"keep_old_root,omitempty"`
+	// LogPersistDir is the post-pivot absolute path (typically under
+	// KeepOldRoot) where xmorph writes durable logs. Empty disables.
+	LogPersistDir string     `json:"log_persist_dir,omitempty"`
+	SSH           *SSHConfig `json:"ssh,omitempty"`
+	Tailscale     *TSConfig  `json:"tailscale,omitempty"`
+	Entrypoint    []string   `json:"entrypoint,omitempty"`
+	Command       []string   `json:"command,omitempty"`
 }
 
 // SSHConfig describes the in-rootfs SSH setup (dropbear for now).

@@ -31,7 +31,10 @@ func NewCoordinator(timeout time.Duration) Coordinator {
 func (c Coordinator) TransitionToRescue() error {
 	switch c.Kind {
 	case Systemd:
-		return c.run("systemctl", "isolate", "rescue.target")
+		// basic.target keeps journal + dbus up but stops all user
+		// services. rescue.target would additionally start sulogin
+		// on the console.
+		return c.run("systemctl", "isolate", "basic.target")
 	case OpenRC:
 		return c.run("openrc", "single")
 	case SysVinit:

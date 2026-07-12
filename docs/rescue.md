@@ -210,6 +210,23 @@ box is worse than a clear "watchdog can't be armed on this host, drop
 `--watchdog-timeout` or fix the kernel." Sub-second timeouts are
 rejected.
 
+## Persistent logs
+
+xmorph writes its own log and the entrypoint's stdout+stderr to
+`/var/log/xmorph/` on the old rootfs by default. Since the pivoted
+rootfs is tmpfs and gone on the next reboot, this is where you look
+after a failed install. Change the location with `--log-persist-path`
+and `--log-persist-device`; empty `--log-persist-path` disables. The
+pivot aborts pre-pivot if the resolved directory isn't writable.
+
+```sh
+sudo xmorph pivot --image alpine --rootfs ./overlay/ \
+  --entrypoint /install.sh \
+  --log-persist-device /srv --log-persist-path xmorph
+# Post-reboot, on the recovered OS:
+tail /srv/xmorph/xmorph.log /srv/xmorph/entrypoint.log
+```
+
 ## Recovery and exit
 
 - **Back to the old OS**: `reboot`. The tmpfs is lost; the system comes

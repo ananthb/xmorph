@@ -3,8 +3,10 @@ package postpivot
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/ananthb/xmorph/internal/tsnetauth"
@@ -33,6 +35,27 @@ func Run(argv []string) int {
 
 	if cfg != nil && cfg.FlushFirewall {
 		FlushFirewall()
+	}
+
+	var entrypointLog io.Writer
+	if cfg != nil && cfg.LogPersistDir != "" {
+		if err := os.MkdirAll(cfg.LogPersistDir, 0o755); err != nil {
+			slog.Error("log-persist mkdir", "dir", cfg.LogPersistDir, "err", err)
+		} else {
+			if xf, err := os.OpenFile(filepath.Join(cfg.LogPersistDir, "xmorph.log"), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644); err == nil {
+				defer xf.Close()
+				slog.SetDefault(slog.New(slog.NewTextHandler(io.MultiWriter(os.Stderr, xf), nil)))
+				slog.Info("persistent log opened", "dir", cfg.LogPersistDir)
+			} else {
+				slog.Error("open xmorph.log", "err", err)
+			}
+			if ef, err := os.OpenFile(filepath.Join(cfg.LogPersistDir, "entrypoint.log"), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644); err == nil {
+				defer ef.Close()
+				entrypointLog = ef
+			} else {
+				slog.Error("open entrypoint.log", "err", err)
+			}
+		}
 	}
 
 	if cfg != nil && cfg.WatchdogTimeoutSeconds > 0 {
@@ -88,6 +111,7 @@ func Run(argv []string) int {
 		Argv:            supervised,
 		RebootOnFailure: rebootOnFailure,
 		OldRootPath:     oldRoot,
+		LogWriter:       entrypointLog,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "xmorph --init: %v\n", err)
