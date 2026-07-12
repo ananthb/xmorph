@@ -164,11 +164,17 @@ sudo xmorph pivot --image alpine \
 sudo xmorph pivot --image alpine
 ```
 
-The dropbear path doesn't need Tailscale but assumes the network already
-works: your machine's interface stays up across the pivot, but if the
-broken OS had odd routing or firewall rules, those die with it. The
-firewall is flushed by default during pivot; pass `--keep-firewall` to
-keep it.
+The `--ssh.enable` path stands up a small pure-Go OpenSSH server inside
+the pivoted rootfs on the given port (default 22) with an ephemeral
+ed25519 host key. Auth is public-key (from `--ssh.authorized-keys`,
+standard `authorized_keys` format, one per line) and/or password
+(`--ssh.password`); at least one must be configured. Sessions run
+`/bin/sh` as root — the rescue rootfs has no user database.
+
+It assumes the network already works: your machine's interface stays
+up across the pivot, but if the broken OS had odd routing or firewall
+rules, those die with it. The firewall is flushed by default during
+pivot; pass `--keep-firewall` to keep it.
 
 ## Headless flag details
 

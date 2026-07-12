@@ -43,11 +43,12 @@ func Run(argv []string) int {
 		defer wd.Close()
 	}
 
-	// SSH setup: M4's stub. Dropbear bring-up arrives at M5/M6 — for
-	// now we just log so behavior is visible in --contain integration
-	// tests.
 	if cfg != nil && cfg.SSH != nil {
-		slog.Info("ssh requested", "port", cfg.SSH.Port)
+		go func() {
+			if err := StartSSHServer(context.Background(), cfg.SSH); err != nil {
+				slog.Error("sshd", "err", err)
+			}
+		}()
 	}
 
 	// Tailscale: re-open the tsnet state persisted by the pre-pivot

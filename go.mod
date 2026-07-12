@@ -3,9 +3,11 @@ module github.com/ananthb/xmorph
 go 1.26.4
 
 require (
+	github.com/creack/pty v1.1.24
 	github.com/google/go-containerregistry v0.21.7
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
+	golang.org/x/crypto v0.52.0
 	golang.org/x/sys v0.46.0
 	golang.org/x/term v0.44.0
 	tailscale.com v1.100.0
@@ -49,7 +51,6 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	go4.org/mem v0.0.0-20240501181205-ae6ca9944745 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
-	golang.org/x/crypto v0.52.0 // indirect
 	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect

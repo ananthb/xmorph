@@ -78,6 +78,22 @@ func printDryRun(w io.Writer, cfg *config.Config) {
 		fmt.Fprintf(w, "     - Args: %s\n", tsArgs)
 	}
 
+	if cfg.SSHEnabled() {
+		fmt.Fprintf(w, "  %d. Start SSH server\n", step)
+		step++
+		port := uint16(22)
+		if cfg.SSHPort != nil {
+			port = *cfg.SSHPort
+		}
+		fmt.Fprintf(w, "     - Port: %d\n", port)
+		if cfg.SSHAuthorizedKeys != "" {
+			fmt.Fprintf(w, "     - Auth: public key (%d configured)\n", strings.Count(strings.TrimSpace(cfg.SSHAuthorizedKeys), "\n")+1)
+		}
+		if cfg.SSHPassword != "" {
+			fmt.Fprintf(w, "     - Auth: password\n")
+		}
+	}
+
 	if !cfg.NoInitCoord {
 		fmt.Fprintf(w, "  %d. Coordinate with init system (%s)\n", step, initsys.Detect())
 		step++
