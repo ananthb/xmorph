@@ -5,6 +5,7 @@ plugins:
   - jekyll-remote-theme
   - jekyll-relative-links
   - jekyll-optional-front-matter
+  - jekyll-readme-index
 relative_links:
   enabled: true
   collections: true
