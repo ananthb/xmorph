@@ -191,8 +191,7 @@ pivot; pass `--keep-firewall` to keep it.
 
 ## Auto-reset on hang
 
-If the entrypoint hangs (stuck `apk add`, DNS timeout, kernel deadlock)
-the pivoted rootfs may be unreachable. `--watchdog-timeout` arms
+If the entrypoint hangs, the pivoted rootfs may be unreachable. `--watchdog-timeout` arms
 `/dev/watchdog` before the entrypoint runs and pets it from a goroutine;
 if anything stops that goroutine the kernel resets and the box comes
 back on the original OS.

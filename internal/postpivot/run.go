@@ -44,24 +44,24 @@ func Run(argv []string) int {
 		}
 	}
 
-	if cfg != nil && cfg.SSH != nil {
-		go func() {
-			if err := StartSSHServer(context.Background(), cfg.SSH); err != nil {
-				slog.Error("sshd", "err", err)
-			}
-		}()
-	}
-
-	// Tailscale: re-open the tsnet state persisted by the pre-pivot
-	// PreAuth and serve SSH on the tailnet. Runs in a goroutine so the
-	// entrypoint supervisor still takes the foreground.
+	var tailnet TailnetListener
 	if cfg != nil && cfg.Tailscale != nil {
 		hostname := hostnameFromArgs(cfg.Tailscale.Args)
+		srv, err := tsnetauth.NewPostPivotServer(context.Background(), tsnetauth.PostPivotOptions{
+			Hostname: hostname,
+		})
+		if err != nil {
+			slog.Error("tsnet post-pivot", "err", err)
+		} else {
+			defer srv.Close()
+			tailnet = srv
+		}
+	}
+
+	if cfg != nil && cfg.SSH != nil {
 		go func() {
-			if err := tsnetauth.PostPivot(context.Background(), tsnetauth.PostPivotOptions{
-				Hostname: hostname,
-			}); err != nil {
-				slog.Error("tsnet post-pivot", "err", err)
+			if err := StartSSHServer(context.Background(), cfg.SSH, tailnet); err != nil {
+				slog.Error("sshd", "err", err)
 			}
 		}()
 	}
