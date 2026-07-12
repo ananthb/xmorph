@@ -1,0 +1,27 @@
+title: xmorph
+description: Replace your running rootfs with a new one without rebooting.
+remote_theme: pages-themes/cayman@v0.2.0
+plugins:
+  - jekyll-remote-theme
+  - jekyll-relative-links
+  - jekyll-optional-front-matter
+relative_links:
+  enabled: true
+  collections: true
+optional_front_matter:
+  remove_originals: true
+readme_index:
+  enabled: true
+include:
+  - README.md
+exclude:
+  - cmd/
+  - internal/
+  - init/
+  - test/
+  - flake.nix
+  - flake.lock
+  - go.mod
+  - go.sum
+  - '*.go'
+  - Makefile
