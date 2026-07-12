@@ -15,12 +15,13 @@ import (
 // before the timeout elapses. On Linux we prefer /dev/watchdog (kernel
 // or hardware, driven by kernel timers even when userspace deadlocks).
 // When that device is unavailable we fall back to a Go time.Timer that
-// calls reboot(2) on expiry — that path still catches an entrypoint
-// that hangs indefinitely, but not a wedged Go runtime.
+// callers extend via Ping — supervisor liveness pets the deadline, so
+// a Supervise loop that stops making progress triggers reset.
 type Watchdog struct {
 	timeout time.Duration
 	fd      *os.File
 	done    chan struct{}
+	reset   chan struct{}
 	once    sync.Once
 }
 
@@ -43,7 +44,11 @@ func StartWatchdog(timeout time.Duration) *Watchdog {
 	if timeout <= 0 {
 		return nil
 	}
-	w := &Watchdog{timeout: timeout, done: make(chan struct{})}
+	w := &Watchdog{
+		timeout: timeout,
+		done:    make(chan struct{}),
+		reset:   make(chan struct{}, 1),
+	}
 	if f, err := os.OpenFile(watchdogDev, os.O_WRONLY, 0); err == nil {
 		secs := int(timeout / time.Second)
 		if secs < 1 {
@@ -79,13 +84,48 @@ func (w *Watchdog) petKernel() {
 }
 
 func (w *Watchdog) petUserspace() {
-	select {
-	case <-w.done:
-		return
-	case <-time.After(w.timeout):
-		slog.Error("watchdog: userspace timer expired; rebooting")
-		doReboot()
+	timer := time.NewTimer(w.timeout)
+	defer timer.Stop()
+	for {
+		select {
+		case <-w.done:
+			return
+		case <-w.reset:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(w.timeout)
+		case <-timer.C:
+			slog.Error("watchdog: userspace timer expired; rebooting")
+			doReboot()
+			return
+		}
 	}
+}
+
+// Ping extends the userspace deadline. No-op on the kernel path (the
+// pet goroutine drives /dev/watchdog directly) and on a nil receiver.
+func (w *Watchdog) Ping() {
+	if w == nil || w.fd != nil {
+		return
+	}
+	select {
+	case w.reset <- struct{}{}:
+	default:
+	}
+}
+
+// PetInterval is the recommended cadence for external callers to invoke
+// Ping. Zero means external petting is unnecessary (kernel path or
+// disabled watchdog); the caller should skip its ticker in that case.
+func (w *Watchdog) PetInterval() time.Duration {
+	if w == nil || w.fd != nil {
+		return 0
+	}
+	return w.timeout / 3
 }
 
 // Close disables the watchdog and stops the pet goroutine. Safe to call

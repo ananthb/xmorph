@@ -125,8 +125,10 @@ sudo xmorph pivot --image alpine --rootfs ./overlay/ \
 ```
 
 Falls back to a userspace `time.Timer` that calls `reboot(2)` when
-`/dev/watchdog` isn't available (e.g. VMs without softdog). The kernel
-path also survives a wedged Go runtime; the userspace fallback doesn't.
+`/dev/watchdog` isn't available (e.g. VMs without softdog). Supervise
+pets the userspace timer on each iteration (`timeout/3` ticker plus
+signal deliveries), so a healthy long-running entrypoint won't trip
+the deadline — only a wedged Supervise loop will.
 
 ### Headless mode with Tailscale
 
