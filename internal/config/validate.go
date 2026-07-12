@@ -4,10 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 )
 
 // ErrInvalidTimeout is returned when --timeout=0.
 var ErrInvalidTimeout = errors.New("timeout must be greater than zero")
+
+// ErrWatchdogTooShort is returned when --watchdog-timeout is set below one second.
+var ErrWatchdogTooShort = errors.New("watchdog-timeout must be at least 1s")
 
 // Validate runs the same set of post-parse checks as src/config.zig:598-626,
 // minus the containerfile mutual-exclusion rule (containerfile support was
@@ -15,6 +19,10 @@ var ErrInvalidTimeout = errors.New("timeout must be greater than zero")
 func (c *Config) Validate(warnW io.Writer) error {
 	if c.Timeout == 0 {
 		return ErrInvalidTimeout
+	}
+
+	if c.WatchdogTimeout != 0 && c.WatchdogTimeout < time.Second {
+		return ErrWatchdogTooShort
 	}
 
 	if c.TailscaleAuthkey == "" {

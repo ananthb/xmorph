@@ -23,12 +23,16 @@ const BinaryPath = "/usr/local/bin/xmorph"
 // Config is the JSON schema written to ConfigPath. Mirrors the schema
 // at the top of src/xenomorph-init.zig.
 type Config struct {
-	FlushFirewall   bool       `json:"flush_firewall"`
-	RebootOnFailure bool       `json:"reboot_on_failure"`
-	SSH             *SSHConfig `json:"ssh,omitempty"`
-	Tailscale       *TSConfig  `json:"tailscale,omitempty"`
-	Entrypoint      []string   `json:"entrypoint,omitempty"`
-	Command         []string   `json:"command,omitempty"`
+	FlushFirewall   bool `json:"flush_firewall"`
+	RebootOnFailure bool `json:"reboot_on_failure"`
+	// WatchdogTimeoutSeconds arms /dev/watchdog (or a userspace timer
+	// fallback) that resets the box if the post-pivot supervisor hangs
+	// longer than this. 0 disables it.
+	WatchdogTimeoutSeconds int        `json:"watchdog_timeout_seconds,omitempty"`
+	SSH                    *SSHConfig `json:"ssh,omitempty"`
+	Tailscale              *TSConfig  `json:"tailscale,omitempty"`
+	Entrypoint             []string   `json:"entrypoint,omitempty"`
+	Command                []string   `json:"command,omitempty"`
 }
 
 // SSHConfig describes the in-rootfs SSH setup (dropbear for now).

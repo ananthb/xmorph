@@ -226,9 +226,10 @@ func runPivot(ctx context.Context, cfg *config.Config, stdout interface {
 
 func buildPostpivotConfig(cfg *config.Config, entrypoint string, entryArgs []string) *postpivot.Config {
 	pc := &postpivot.Config{
-		FlushFirewall:   !cfg.KeepFirewall,
-		RebootOnFailure: true,
-		Entrypoint:      append([]string{entrypoint}, entryArgs...),
+		FlushFirewall:          !cfg.KeepFirewall,
+		RebootOnFailure:        true,
+		WatchdogTimeoutSeconds: int(cfg.WatchdogTimeout / time.Second),
+		Entrypoint:             append([]string{entrypoint}, entryArgs...),
 	}
 	if cfg.SSHEnabled() {
 		ssh := &postpivot.SSHConfig{
