@@ -13,7 +13,7 @@ cloud-init via the NoCloud seed directory.
 | `debootstrap` | Installed via `apt-get` from Debian's repos at runtime |
 | Ubuntu rootfs | `http://archive.ubuntu.com/ubuntu/` (Ubuntu's official archive) |
 | Kernel, grub, cloud-init | Installed via Ubuntu's apt mirror during chroot phase |
-| Config | Your cloud-init `user-data`, baked into the Containerfile |
+| Config | Your cloud-init `user-data`, layered in via `--rootfs` |
 
 Why `debian:stable` and not `ubuntu:noble`? Either works, but Debian's
 `debootstrap` package consistently carries up-to-date scripts for both
@@ -140,31 +140,36 @@ For **BIOS instead of UEFI**, change the partition layout to a small
 `apt-get install -y grub-pc && grub-install --target=i386-pc "$DISK" &&
 update-grub`. Skip `efibootmgr`.
 
-### `Containerfile`
+### Overlay layout
 
-```dockerfile
-FROM docker.io/debian:stable
-COPY install.sh /install.sh
-COPY user-data /etc/user-data
-ENTRYPOINT ["/install.sh"]
+```
+overlay/
+├── install.sh          # chmod +x
+└── etc/
+    └── user-data
 ```
 
 ## Run it
 
 ```sh
-sudo xmorph pivot --containerfile ./Containerfile --force
+sudo xmorph pivot \
+  --image docker.io/debian:stable \
+  --rootfs ./overlay/ \
+  --entrypoint /install.sh \
+  --force
 ```
 
 To install to a different disk:
 
 ```sh
-# Edit install.sh and change DISK=, or set it at xmorph entrypoint time
+# Edit install.sh and change DISK=, or set DISK at xmorph entrypoint time
 # by wrapping install.sh.
 ```
 
 ## What happens
 
-1. xmorph builds the OCI image and pivots into it.
+1. xmorph pulls `debian:stable`, merges `./overlay/` (your `user-data`
+   and `install.sh`) on top, and pivots into the combined rootfs.
 2. `install.sh`:
    - `apt-get install`s debootstrap + partitioning tools
    - Wipes and partitions `/dev/sda` (GPT: 512M ESP + ext4 root)

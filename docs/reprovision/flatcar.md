@@ -10,7 +10,7 @@ using the upstream `flatcar-install` script wrapped in an Alpine container.
 | Wrapper image base | `docker.io/alpine:latest` (Docker Official, maintained by Alpine's founder) |
 | `flatcar-install` script | `https://raw.githubusercontent.com/flatcar/init/flatcar-master/bin/flatcar-install` (upstream, fetched at runtime) |
 | Flatcar disk image | `https://<channel>.release.flatcar-linux.net/<board>/<version>/` (GPG-verified by `flatcar-install` against the embedded Flatcar Buildbot key) |
-| Config | Your own Ignition config, baked into the Containerfile |
+| Config | Your own Ignition config, layered in via `--rootfs` |
 
 Flatcar does not publish an official installer container, so we use the
 upstream shell script. Image fetching is GPG-verified; the script itself
@@ -83,19 +83,26 @@ sync
 reboot -f 2>/dev/null || echo b > /proc/sysrq-trigger
 ```
 
-### `Containerfile`
+### Overlay layout
 
-```dockerfile
-FROM docker.io/alpine:latest
-COPY install.sh /install.sh
-COPY config.ign /etc/config.ign
-ENTRYPOINT ["/install.sh"]
+Put your install script and Ignition config into a directory tree that
+mirrors the paths you want in the pivoted rootfs:
+
+```
+overlay/
+├── install.sh          # chmod +x
+└── etc/
+    └── config.ign
 ```
 
 ## Run it
 
 ```sh
-sudo xmorph pivot --containerfile ./Containerfile --force
+sudo xmorph pivot \
+  --image docker.io/alpine:latest \
+  --rootfs ./overlay/ \
+  --entrypoint /install.sh \
+  --force
 ```
 
 To pin the Flatcar version explicitly:
@@ -108,7 +115,8 @@ To pin the Flatcar version explicitly:
 
 ## What happens
 
-1. xmorph builds the OCI image and pivots into it.
+1. xmorph pulls `alpine:latest`, merges `./overlay/` on top, and pivots
+   into the combined rootfs.
 2. `install.sh` `apk add`s the tools `flatcar-install` needs.
 3. It fetches `flatcar-install` from the pinned ref on GitHub.
 4. `flatcar-install`:

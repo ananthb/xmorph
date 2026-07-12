@@ -10,7 +10,7 @@ using `setup-disk` from the official Alpine container.
 | Installer image | `docker.io/alpine:latest` (Docker Official, maintained by Alpine's founder; built at `github.com/alpinelinux/docker-alpine`) |
 | `alpine-conf` (`setup-disk`, `setup-alpine`) | Installed via `apk` from `dl-cdn.alpinelinux.org` at runtime |
 | Alpine APK packages | `https://dl-cdn.alpinelinux.org/alpine/` |
-| Config | Your answers, baked into the Containerfile as env exports |
+| Config | Your answers, layered in via `--rootfs` (env exports live in `install.sh`) |
 
 The base Alpine image is ~5 MB and ships only musl + BusyBox + apk; the
 installer tools are added at runtime.
@@ -95,19 +95,23 @@ reboot -f 2>/dev/null || echo b > /proc/sysrq-trigger
 ssh-ed25519 AAAA... your-key-here
 ```
 
-### `Containerfile`
+### Overlay layout
 
-```dockerfile
-FROM docker.io/alpine:latest
-COPY install.sh /install.sh
-COPY authorized_keys /etc/authorized_keys
-ENTRYPOINT ["/install.sh"]
+```
+overlay/
+├── install.sh          # chmod +x
+└── etc/
+    └── authorized_keys
 ```
 
 ## Run it
 
 ```sh
-sudo xmorph pivot --containerfile ./Containerfile --force
+sudo xmorph pivot \
+  --image docker.io/alpine:latest \
+  --rootfs ./overlay/ \
+  --entrypoint /install.sh \
+  --force
 ```
 
 For UEFI:
@@ -118,7 +122,9 @@ For UEFI:
 
 ## What happens
 
-1. xmorph builds the OCI image and pivots into it.
+1. xmorph pulls `alpine:latest`, merges `./overlay/` (your
+   `authorized_keys` and `install.sh`) on top, and pivots into the
+   combined rootfs.
 2. `install.sh`:
    - Points apk at the chosen Alpine branch mirror
    - `apk add`s `alpine-conf` (which provides `setup-*`) and filesystem
