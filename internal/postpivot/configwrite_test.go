@@ -10,8 +10,9 @@ import (
 func TestWriteConfigRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	cfg := &Config{
-		FlushFirewall:   true,
-		RebootOnFailure: true,
+		FlushFirewall:          true,
+		RebootOnFailure:        true,
+		WatchdogTimeoutSeconds: 300,
 		SSH: &SSHConfig{
 			Port:           22,
 			AuthorizedKeys: "ssh-ed25519 AAAA",
@@ -39,6 +40,9 @@ func TestWriteConfigRoundTrip(t *testing.T) {
 	if !got.FlushFirewall || !got.RebootOnFailure {
 		t.Error("boolean fields lost")
 	}
+	if got.WatchdogTimeoutSeconds != 300 {
+		t.Errorf("WatchdogTimeoutSeconds = %d, want 300", got.WatchdogTimeoutSeconds)
+	}
 	if got.SSH == nil || got.SSH.Port != 22 {
 		t.Errorf("SSH = %+v", got.SSH)
 	}
@@ -58,7 +62,7 @@ func TestWriteConfigOmitsEmptyOptional(t *testing.T) {
 	}
 	data, _ := os.ReadFile(filepath.Join(dir, ConfigPath))
 	s := string(data)
-	for _, omitted := range []string{"\"ssh\"", "\"tailscale\"", "\"entrypoint\""} {
+	for _, omitted := range []string{"\"ssh\"", "\"tailscale\"", "\"entrypoint\"", "\"watchdog_timeout_seconds\""} {
 		if contains := indexOfStr(s, omitted) >= 0; contains {
 			t.Errorf("expected %q to be omitted; got %s", omitted, s)
 		}

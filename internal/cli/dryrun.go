@@ -38,6 +38,9 @@ func printDryRun(w io.Writer, cfg *config.Config) {
 	fmt.Fprintf(w, "Keep old root: %s\n", cfg.KeepOldRoot)
 	fmt.Fprintf(w, "Contain: %s\n", boolStr(cfg.Contain))
 	fmt.Fprintf(w, "Timeout: %ds\n", cfg.Timeout)
+	if cfg.WatchdogTimeout > 0 {
+		fmt.Fprintf(w, "Watchdog: %s (reset if hung; /dev/watchdog or userspace timer)\n", cfg.WatchdogTimeout)
+	}
 	if cfg.Headless {
 		fmt.Fprintf(w, "Mode: headless (will fork and detach, log to /var/log/xmorph.log)\n")
 	}

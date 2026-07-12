@@ -5,6 +5,8 @@
 // rewrite — see the port plan).
 package config
 
+import "time"
+
 // Subcommand identifies which top-level command the user invoked.
 type Subcommand int
 
@@ -89,6 +91,11 @@ type Config struct {
 	RootfsOutput string // build subcommand: optional rootfs tarball output
 
 	KeepFirewall bool
+
+	// WatchdogTimeout is the deadline after which the post-pivot supervisor
+	// resets the box if it hasn't returned to a healthy state. Zero disables
+	// it. Prefers /dev/watchdog (kernel), falls back to a userspace timer.
+	WatchdogTimeout time.Duration
 
 	// SSH: tri-state Enable (nil = auto from other ssh.* flags), explicit
 	// fields below.

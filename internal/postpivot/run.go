@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/ananthb/xmorph/internal/tsnetauth"
 )
@@ -32,6 +33,13 @@ func Run(argv []string) int {
 
 	if cfg != nil && cfg.FlushFirewall {
 		FlushFirewall()
+	}
+
+	// Watchdog first — arm it before we touch the network or supervise the
+	// entrypoint, so a hang anywhere in this function still triggers reset.
+	if cfg != nil && cfg.WatchdogTimeoutSeconds > 0 {
+		wd := StartWatchdog(time.Duration(cfg.WatchdogTimeoutSeconds) * time.Second)
+		defer wd.Close()
 	}
 
 	// SSH setup: M4's stub. Dropbear bring-up arrives at M5/M6 — for

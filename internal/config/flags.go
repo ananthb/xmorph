@@ -71,6 +71,7 @@ func bindPivotOnly(fs *pflag.FlagSet, cfg *Config) {
 	fs.BoolVar(&cfg.SystemdMode, "systemd-mode", false, "running as systemd unit (implies --no-init-coord and --force)")
 	fs.BoolVar(&cfg.Headless, "headless", false, "detach from terminal (implies --force)")
 	fs.BoolVar(&cfg.KeepFirewall, "keep-firewall", false, "keep existing firewall rules (default: flush before starting services)")
+	fs.DurationVar(&cfg.WatchdogTimeout, "watchdog-timeout", 0, "reset the box if the pivoted entrypoint hangs longer than this (0: disabled; uses /dev/watchdog when available, otherwise a userspace timer)")
 }
 
 func bindBuildOnly(fs *pflag.FlagSet, cfg *Config) {
