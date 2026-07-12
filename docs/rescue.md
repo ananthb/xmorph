@@ -199,9 +199,12 @@ sudo xmorph pivot --image alpine --rootfs ./overlay/ \
 ```
 
 Without `/dev/watchdog` xmorph falls back to a `time.Timer` that calls
-`reboot(2)` — narrower coverage (won't fire on a wedged Go runtime) but
-still catches "install script hangs on network," which is the common
-failure mode. Sub-second timeouts are rejected.
+`reboot(2)`. Supervise pets it on each iteration (a `timeout/3` ticker
+plus every signal it forwards to the child), so long-running healthy
+entrypoints don't trip the deadline. It fires when the Supervise loop
+itself stops making progress — narrower than kernel coverage but still
+catches "install script wedged Supervise's tick." Sub-second timeouts
+are rejected.
 
 ## Recovery and exit
 
@@ -217,8 +220,8 @@ failure mode. Sub-second timeouts are rejected.
 
 For an always-available rescue path that you can trigger remotely without
 rebuilding the image every time, install xmorph as a `rescue.target`
-unit. See the [Main README](../README.md#systemd-rescuetarget) for the
-unit file and NixOS module. Once installed:
+unit. See [systemd integration](systemd.md) for the unit file and NixOS
+module. Once installed:
 
 ```sh
 sudo systemctl isolate rescue.target
@@ -230,7 +233,9 @@ the pivot itself is sub-second when you actually need it.
 
 ## See also
 
-- [Main README](../README.md) — installation, full flag reference
+- [Main README](../README.md) — install
+- [systemd integration](systemd.md) — rescue.target unit + NixOS module
+- `xmorph --help` and `xmorph pivot --help` — full flag reference
 - [Reprovisioning](reprovision/) — replace the OS instead of rescuing it
 - [Tailscale auth keys](https://tailscale.com/kb/1085/auth-keys) — prefer
   ephemeral for rescue use

@@ -13,3 +13,9 @@ func StartWatchdog(timeout time.Duration) *Watchdog { return nil }
 
 // Close is a no-op.
 func (*Watchdog) Close() {}
+
+// Ping is a no-op.
+func (*Watchdog) Ping() {}
+
+// PetInterval is zero — external petting is unnecessary on this platform.
+func (*Watchdog) PetInterval() time.Duration { return 0 }
