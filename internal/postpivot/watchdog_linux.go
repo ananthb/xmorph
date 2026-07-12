@@ -100,7 +100,7 @@ func (w *Watchdog) petUserspace() {
 			timer.Reset(w.timeout)
 		case <-timer.C:
 			slog.Error("watchdog: userspace timer expired; rebooting")
-			doReboot("") // wedged path — skip unmount to avoid hanging
+			doReboot("") // skip unmount: if we're firing, unmount could also hang
 			return
 		}
 	}
