@@ -35,12 +35,13 @@ func Run(argv []string) int {
 		FlushFirewall()
 	}
 
-	// Watchdog first — arm it before we touch the network or supervise the
-	// entrypoint, so a hang anywhere in this function still triggers reset.
-	var wd *Watchdog
 	if cfg != nil && cfg.WatchdogTimeoutSeconds > 0 {
-		wd = StartWatchdog(time.Duration(cfg.WatchdogTimeoutSeconds) * time.Second)
-		defer wd.Close()
+		wd, err := StartWatchdog(time.Duration(cfg.WatchdogTimeoutSeconds) * time.Second)
+		if err != nil {
+			slog.Error("watchdog: cannot arm post-pivot", "err", err)
+		} else {
+			defer wd.Close()
+		}
 	}
 
 	if cfg != nil && cfg.SSH != nil {
@@ -86,7 +87,6 @@ func Run(argv []string) int {
 	code, err := Supervise(SuperviseOptions{
 		Argv:            supervised,
 		RebootOnFailure: rebootOnFailure,
-		Watchdog:        wd,
 		OldRootPath:     oldRoot,
 	})
 	if err != nil {

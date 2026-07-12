@@ -191,7 +191,7 @@ pivot; pass `--keep-firewall` to keep it.
 
 ## Auto-reset on hang
 
-If the entrypoint wedges (hung `apk add`, DNS timeout, kernel deadlock)
+If the entrypoint hangs (stuck `apk add`, DNS timeout, kernel deadlock)
 the pivoted rootfs may be unreachable. `--watchdog-timeout` arms
 `/dev/watchdog` before the entrypoint runs and pets it from a goroutine;
 if anything stops that goroutine the kernel resets and the box comes
@@ -204,13 +204,12 @@ sudo xmorph pivot --image alpine --rootfs ./overlay/ \
   --tailscale.authkey tskey-auth-xxxxx
 ```
 
-Without `/dev/watchdog` xmorph falls back to a `time.Timer` that calls
-`reboot(2)`. Supervise pets it on each iteration (a `timeout/3` ticker
-plus every signal it forwards to the child), so long-running healthy
-entrypoints don't trip the deadline. It fires when the Supervise loop
-itself stops making progress — narrower than kernel coverage but still
-catches "install script wedged Supervise's tick." Sub-second timeouts
-are rejected.
+xmorph checks pre-pivot that `/dev/watchdog` is available; if it's
+missing it runs `modprobe softdog` and retries. If softdog can't load
+either, the pivot aborts before touching the running OS — a locked-out
+box is worse than a clear "watchdog can't be armed on this host, drop
+`--watchdog-timeout` or fix the kernel." Sub-second timeouts are
+rejected.
 
 ## Recovery and exit
 

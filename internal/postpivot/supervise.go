@@ -20,9 +20,6 @@ type SuperviseOptions struct {
 	// signal), sync the filesystem and trigger LINUX_REBOOT_CMD_RESTART
 	// so the original OS comes back. Mirrors src/xenomorph-init.zig:336-352.
 	RebootOnFailure bool
-	// Watchdog, if non-nil, is petted on each supervisor iteration.
-	// Nil, kernel-path, and no-op stubs are safe.
-	Watchdog *Watchdog
 	// OldRootPath is unmounted before reboot; empty skips.
 	OldRootPath string
 }
@@ -61,22 +58,10 @@ func Supervise(opts SuperviseOptions) (exitCode int, err error) {
 	doneCh := make(chan error, 1)
 	go func() { doneCh <- cmd.Wait() }()
 
-	var petC <-chan time.Time
-	if interval := opts.Watchdog.PetInterval(); interval > 0 {
-		t := time.NewTicker(interval)
-		defer t.Stop()
-		petC = t.C
-		opts.Watchdog.Ping() // extend on entry so the first tick has room
-	}
-
 	for {
 		select {
 		case sig := <-sigCh:
-			// Forward to the supervised child.
 			_ = cmd.Process.Signal(sig)
-			opts.Watchdog.Ping()
-		case <-petC:
-			opts.Watchdog.Ping()
 		case err := <-doneCh:
 			signal.Stop(sigCh)
 			reapOrphans()

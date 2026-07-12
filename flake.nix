@@ -35,7 +35,7 @@
         # vendorHash is reproducible from go.mod + go.sum. Update by
         # setting `vendorHash = lib.fakeHash` and rebuilding — Nix will
         # print the expected hash, which you paste back here.
-        vendorHash = "sha256-gGLhkmEzCuzov8fAfkYsdE+Qxji9ZFvfFK2iTNHK5ME=";
+        vendorHash = "sha256-B0H0cd5m6+bxoR5FZiRqfs/BA5x3nRbmsywAdhg+CXU=";
 
         # From-source build for `nix build` / `nix run`. Release artifacts
         # come from goreleaser (see .goreleaser.yaml); this derivation feeds
