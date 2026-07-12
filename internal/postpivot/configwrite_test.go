@@ -13,6 +13,7 @@ func TestWriteConfigRoundTrip(t *testing.T) {
 		FlushFirewall:          true,
 		RebootOnFailure:        true,
 		WatchdogTimeoutSeconds: 300,
+		KeepOldRoot:            "/mnt/oldroot",
 		SSH: &SSHConfig{
 			Port:           22,
 			AuthorizedKeys: "ssh-ed25519 AAAA",
@@ -43,6 +44,9 @@ func TestWriteConfigRoundTrip(t *testing.T) {
 	if got.WatchdogTimeoutSeconds != 300 {
 		t.Errorf("WatchdogTimeoutSeconds = %d, want 300", got.WatchdogTimeoutSeconds)
 	}
+	if got.KeepOldRoot != "/mnt/oldroot" {
+		t.Errorf("KeepOldRoot = %q, want /mnt/oldroot", got.KeepOldRoot)
+	}
 	if got.SSH == nil || got.SSH.Port != 22 {
 		t.Errorf("SSH = %+v", got.SSH)
 	}
@@ -62,7 +66,7 @@ func TestWriteConfigOmitsEmptyOptional(t *testing.T) {
 	}
 	data, _ := os.ReadFile(filepath.Join(dir, ConfigPath))
 	s := string(data)
-	for _, omitted := range []string{"\"ssh\"", "\"tailscale\"", "\"entrypoint\"", "\"watchdog_timeout_seconds\""} {
+	for _, omitted := range []string{"\"ssh\"", "\"tailscale\"", "\"entrypoint\"", "\"watchdog_timeout_seconds\"", "\"keep_old_root\""} {
 		if contains := indexOfStr(s, omitted) >= 0; contains {
 			t.Errorf("expected %q to be omitted; got %s", omitted, s)
 		}

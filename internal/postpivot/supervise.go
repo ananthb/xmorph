@@ -21,9 +21,10 @@ type SuperviseOptions struct {
 	// so the original OS comes back. Mirrors src/xenomorph-init.zig:336-352.
 	RebootOnFailure bool
 	// Watchdog, if non-nil, is petted on each supervisor iteration.
-	// PetInterval() > 0 arms a periodic ticker; signals also ping.
 	// Nil, kernel-path, and no-op stubs are safe.
 	Watchdog *Watchdog
+	// OldRootPath is unmounted before reboot; empty skips.
+	OldRootPath string
 }
 
 // Supervise spawns Argv as a child process and forwards
@@ -81,7 +82,7 @@ func Supervise(opts SuperviseOptions) (exitCode int, err error) {
 			reapOrphans()
 			code := exitStatusFrom(cmd, err)
 			if opts.RebootOnFailure && code != 0 {
-				rebootSystem()
+				rebootSystem(opts.OldRootPath)
 			}
 			return code, nil
 		}
@@ -119,10 +120,9 @@ func exitStatusFrom(cmd *exec.Cmd, waitErr error) int {
 	return 0
 }
 
-// rebootSystem flushes filesystem buffers and issues LINUX_REBOOT_CMD_RESTART.
-// Sleeps 5 seconds before rebooting so log lines have time to flush.
-// Implemented in arch-specific files so we can call the right syscall.
-func rebootSystem() {
+// rebootSystem sleeps 5s (for log flush), then hands off to the
+// platform doReboot.
+func rebootSystem(oldRoot string) {
 	time.Sleep(5 * time.Second)
-	doReboot() // platform-specific (devices.go / devices_other.go)
+	doReboot(oldRoot)
 }

@@ -17,6 +17,20 @@ import (
 // Errors on individual unmounts are tolerated (logged via the returned
 // slice); only enumeration failure is returned.
 func CleanupOldRoot(oldRoot string) ([]string, error) {
+	return unmountUnder(oldRoot, unix.MNT_DETACH)
+}
+
+// UnmountOldRoot is CleanupOldRoot's blocking sibling: normal unmount
+// with an MNT_FORCE retry. Use before reboot so journals close cleanly.
+func UnmountOldRoot(oldRoot string) ([]string, error) {
+	failed, err := unmountUnder(oldRoot, 0)
+	if err != nil || len(failed) == 0 {
+		return failed, err
+	}
+	return unmountUnder(oldRoot, unix.MNT_FORCE)
+}
+
+func unmountUnder(oldRoot string, flags int) ([]string, error) {
 	mounts, err := readMountTargets()
 	if err != nil {
 		return nil, fmt.Errorf("read /proc/self/mounts: %w", err)
@@ -28,16 +42,11 @@ func CleanupOldRoot(oldRoot string) ([]string, error) {
 			under = append(under, m)
 		}
 	}
-
-	// Deepest first: longer paths come before their parents so MNT_DETACH
-	// at the leaf doesn't fight with submounts still attached.
-	sort.Slice(under, func(i, j int) bool {
-		return len(under[i]) > len(under[j])
-	})
+	sort.Slice(under, func(i, j int) bool { return len(under[i]) > len(under[j]) })
 
 	var failed []string
 	for _, m := range under {
-		if err := unix.Unmount(m, unix.MNT_DETACH); err != nil {
+		if err := unix.Unmount(m, flags); err != nil {
 			failed = append(failed, fmt.Sprintf("%s: %v", m, err))
 		}
 	}

@@ -4,4 +4,4 @@ package postpivot
 
 import "os"
 
-func doReboot() { os.Exit(1) }
+func doReboot(_ string) { os.Exit(1) }
