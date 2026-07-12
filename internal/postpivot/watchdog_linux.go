@@ -3,72 +3,105 @@
 package postpivot
 
 import (
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"sync"
 	"time"
 
 	"golang.org/x/sys/unix"
 )
 
-// Watchdog resets the box if the post-pivot supervisor stops petting it
-// before the timeout elapses. On Linux we prefer /dev/watchdog (kernel
-// or hardware, driven by kernel timers even when userspace deadlocks).
-// When that device is unavailable we fall back to a Go time.Timer that
-// callers extend via Ping — supervisor liveness pets the deadline, so
-// a Supervise loop that stops making progress triggers reset.
+// Watchdog holds /dev/watchdog open and pets it from a goroutine.
+// Kernel-only — no userspace fallback. If /dev/watchdog is missing,
+// StartWatchdog auto-loads softdog and errors out if that fails.
 type Watchdog struct {
 	timeout time.Duration
 	fd      *os.File
 	done    chan struct{}
-	reset   chan struct{}
 	once    sync.Once
 }
 
 // _WDIOC_SETTIMEOUT sets the watchdog timeout in seconds.
-// Layout: _IOWR('W', 6, int) — see include/uapi/linux/watchdog.h.
+// Layout: _IOWR('W', 6, int) — include/uapi/linux/watchdog.h.
 const _WDIOC_SETTIMEOUT = 0xc0045706
 
-// wdMagicClose disables the watchdog when written before close. Without
-// it, closing the fd still lets the watchdog fire.
+// wdMagicClose disables the watchdog on close (writing 'V' before
+// closing the fd; else the kernel still fires the reset).
 const wdMagicClose byte = 'V'
 
-// watchdogDev is the path to the kernel watchdog device. Exposed as a
-// var so tests can point it at a temp path.
+// watchdogDev is the kernel watchdog device path. var so tests can swap it.
 var watchdogDev = "/dev/watchdog"
 
-// StartWatchdog arms the watchdog for the given timeout. timeout must
-// be > 0; callers should guard on that. Returns a Watchdog that must be
-// Close()d on success — otherwise the timer fires and the box resets.
-func StartWatchdog(timeout time.Duration) *Watchdog {
-	if timeout <= 0 {
-		return nil
-	}
-	w := &Watchdog{
-		timeout: timeout,
-		done:    make(chan struct{}),
-		reset:   make(chan struct{}, 1),
-	}
-	if f, err := os.OpenFile(watchdogDev, os.O_WRONLY, 0); err == nil {
-		secs := int(timeout / time.Second)
-		if secs < 1 {
-			secs = 1
-		}
-		if err := unix.IoctlSetPointerInt(int(f.Fd()), _WDIOC_SETTIMEOUT, secs); err != nil {
-			slog.Warn("watchdog: set timeout failed; using kernel default", "err", err)
-		}
-		w.fd = f
-		slog.Info("watchdog: kernel /dev/watchdog armed", "timeout", timeout)
-		go w.petKernel()
-		return w
-	} else {
-		slog.Warn("watchdog: kernel unavailable, using userspace timer", "err", err)
-	}
-	go w.petUserspace()
-	return w
+// modprobeCmd auto-loads softdog when /dev/watchdog is absent. var
+// so tests can swap it for a fake.
+var modprobeCmd = func() error {
+	return exec.Command("modprobe", "softdog").Run()
 }
 
-func (w *Watchdog) petKernel() {
+// EnsureWatchdogAvailable opens /dev/watchdog (loading softdog if
+// needed), disarms it, and closes. Use pre-pivot so we fail fast
+// while the old OS is still alive.
+func EnsureWatchdogAvailable() error {
+	f, err := openWatchdog()
+	if err != nil {
+		return err
+	}
+	_, _ = f.Write([]byte{wdMagicClose})
+	_ = f.Close()
+	return nil
+}
+
+func openWatchdog() (*os.File, error) {
+	f, err := os.OpenFile(watchdogDev, os.O_WRONLY, 0)
+	if err == nil {
+		return f, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("open %s: %w", watchdogDev, err)
+	}
+	if merr := modprobeCmd(); merr != nil {
+		return nil, fmt.Errorf("%s missing and modprobe softdog failed: %w", watchdogDev, merr)
+	}
+	f, err = os.OpenFile(watchdogDev, os.O_WRONLY, 0)
+	if err != nil {
+		return nil, fmt.Errorf("open %s after modprobe softdog: %w", watchdogDev, err)
+	}
+	return f, nil
+}
+
+// StartWatchdog arms the kernel watchdog for timeout. Non-positive
+// timeout returns (nil, nil) as a no-op. Returns an error if
+// /dev/watchdog is missing and softdog can't be loaded.
+func StartWatchdog(timeout time.Duration) (*Watchdog, error) {
+	if timeout <= 0 {
+		return nil, nil
+	}
+	f, err := openWatchdog()
+	if err != nil {
+		return nil, err
+	}
+	secs := int(timeout / time.Second)
+	if secs < 1 {
+		secs = 1
+	}
+	if err := unix.IoctlSetPointerInt(int(f.Fd()), _WDIOC_SETTIMEOUT, secs); err != nil {
+		slog.Warn("watchdog: set timeout failed; using kernel default", "err", err)
+	}
+	slog.Info("watchdog: armed", "timeout", timeout)
+
+	w := &Watchdog{
+		timeout: timeout,
+		fd:      f,
+		done:    make(chan struct{}),
+	}
+	go w.pet()
+	return w, nil
+}
+
+func (w *Watchdog) pet() {
 	tick := time.NewTicker(w.timeout / 3)
 	defer tick.Stop()
 	for {
@@ -83,62 +116,14 @@ func (w *Watchdog) petKernel() {
 	}
 }
 
-func (w *Watchdog) petUserspace() {
-	timer := time.NewTimer(w.timeout)
-	defer timer.Stop()
-	for {
-		select {
-		case <-w.done:
-			return
-		case <-w.reset:
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			timer.Reset(w.timeout)
-		case <-timer.C:
-			slog.Error("watchdog: userspace timer expired; rebooting")
-			doReboot("") // skip unmount: if we're firing, unmount could also hang
-			return
-		}
-	}
-}
-
-// Ping extends the userspace deadline. No-op on the kernel path (the
-// pet goroutine drives /dev/watchdog directly) and on a nil receiver.
-func (w *Watchdog) Ping() {
-	if w == nil || w.fd != nil {
-		return
-	}
-	select {
-	case w.reset <- struct{}{}:
-	default:
-	}
-}
-
-// PetInterval is the recommended cadence for external callers to invoke
-// Ping. Zero means external petting is unnecessary (kernel path or
-// disabled watchdog); the caller should skip its ticker in that case.
-func (w *Watchdog) PetInterval() time.Duration {
-	if w == nil || w.fd != nil {
-		return 0
-	}
-	return w.timeout / 3
-}
-
-// Close disables the watchdog and stops the pet goroutine. Safe to call
-// on a nil receiver or multiple times.
+// Close disarms the watchdog. Safe on nil, idempotent.
 func (w *Watchdog) Close() {
 	if w == nil {
 		return
 	}
 	w.once.Do(func() {
 		close(w.done)
-		if w.fd != nil {
-			_, _ = w.fd.Write([]byte{wdMagicClose})
-			_ = w.fd.Close()
-		}
+		_, _ = w.fd.Write([]byte{wdMagicClose})
+		_ = w.fd.Close()
 	})
 }

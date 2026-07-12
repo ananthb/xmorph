@@ -3,15 +3,15 @@
 package postpivot
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
 
-// TestStartWatchdogKernelPath points watchdogDev at a temp file so we
-// can verify the pet loop actually writes and that Close disables cleanly.
-func TestStartWatchdogKernelPath(t *testing.T) {
+func fakeWatchdog(t *testing.T) string {
+	t.Helper()
 	prev := watchdogDev
 	dir := t.TempDir()
 	dev := filepath.Join(dir, "watchdog")
@@ -22,20 +22,23 @@ func TestStartWatchdogKernelPath(t *testing.T) {
 	f.Close()
 	watchdogDev = dev
 	t.Cleanup(func() { watchdogDev = prev })
+	return dev
+}
 
-	w := StartWatchdog(300 * time.Millisecond)
+func TestStartWatchdogKernelPath(t *testing.T) {
+	dev := fakeWatchdog(t)
+
+	w, err := StartWatchdog(300 * time.Millisecond)
+	if err != nil {
+		t.Fatalf("StartWatchdog: %v", err)
+	}
 	if w == nil {
-		t.Fatal("StartWatchdog returned nil")
-	}
-	if w.fd == nil {
-		t.Fatal("expected kernel-path (fd non-nil) for fake device")
+		t.Fatal("expected non-nil watchdog")
 	}
 
-	// Give the pet goroutine a couple of ticks.
 	time.Sleep(300 * time.Millisecond)
 	w.Close()
 
-	// After Close, last byte should be the magic-close 'V'.
 	data, err := os.ReadFile(dev)
 	if err != nil {
 		t.Fatalf("read fake wdev: %v", err)
@@ -43,81 +46,83 @@ func TestStartWatchdogKernelPath(t *testing.T) {
 	if len(data) == 0 || data[len(data)-1] != wdMagicClose {
 		t.Fatalf("expected trailing 'V' magic; got %q", data)
 	}
-
-	// Close is idempotent.
-	w.Close()
+	w.Close() // idempotent
 }
 
-// TestStartWatchdogZeroReturnsNil covers the guard.
 func TestStartWatchdogZeroReturnsNil(t *testing.T) {
-	if StartWatchdog(0) != nil {
-		t.Fatal("StartWatchdog(0) should return nil")
+	w, err := StartWatchdog(0)
+	if w != nil || err != nil {
+		t.Errorf("StartWatchdog(0) = (%v, %v), want (nil, nil)", w, err)
 	}
-	if StartWatchdog(-time.Second) != nil {
-		t.Fatal("StartWatchdog(<0) should return nil")
+	w, err = StartWatchdog(-time.Second)
+	if w != nil || err != nil {
+		t.Errorf("StartWatchdog(<0) = (%v, %v), want (nil, nil)", w, err)
 	}
 }
 
-// TestWatchdogCloseNilSafe: nil-receiver Close mustn't panic.
 func TestWatchdogCloseNilSafe(t *testing.T) {
 	var w *Watchdog
 	w.Close()
-	w.Ping()
-	if w.PetInterval() != 0 {
-		t.Error("nil PetInterval should be 0")
-	}
 }
 
-// TestUserspacePingExtendsDeadline: when /dev/watchdog is unavailable
-// the userspace timer resets on Ping. We can't wait full seconds in a
-// unit test, so we drive petUserspace via a tiny timeout and rely on
-// the reset channel semantics.
-func TestUserspacePingExtendsDeadline(t *testing.T) {
+func TestOpenWatchdogModprobesSoftdog(t *testing.T) {
 	prev := watchdogDev
-	watchdogDev = "/dev/nonexistent-force-userspace"
-	t.Cleanup(func() { watchdogDev = prev })
-
-	w := StartWatchdog(200 * time.Millisecond)
-	if w == nil {
-		t.Fatal("StartWatchdog returned nil")
-	}
-	if w.fd != nil {
-		t.Fatal("expected userspace path (fd should be nil)")
-	}
-	if got := w.PetInterval(); got != 200*time.Millisecond/3 {
-		t.Errorf("PetInterval = %v, want %v", got, 200*time.Millisecond/3)
-	}
-	// Ping repeatedly, faster than timeout, and confirm the goroutine
-	// hasn't reached doReboot after 3 timeouts elapsed. We can't observe
-	// doReboot() without dying, so this is a smoke test: no reboot ⇒ pass.
-	for range 6 {
-		w.Ping()
-		time.Sleep(60 * time.Millisecond)
-	}
-	w.Close()
-}
-
-// TestKernelPathPingNoop: on the kernel path Ping and PetInterval must
-// not exercise the userspace machinery.
-func TestKernelPathPingNoop(t *testing.T) {
-	prev := watchdogDev
+	prevModprobe := modprobeCmd
 	dir := t.TempDir()
-	dev := filepath.Join(dir, "watchdog")
-	f, err := os.Create(dev)
+	dev := filepath.Join(dir, "watchdog-missing")
+	watchdogDev = dev
+
+	called := false
+	modprobeCmd = func() error {
+		called = true
+		// Simulate softdog loading by creating the device.
+		f, err := os.Create(dev)
+		if err != nil {
+			return err
+		}
+		return f.Close()
+	}
+	t.Cleanup(func() {
+		watchdogDev = prev
+		modprobeCmd = prevModprobe
+	})
+
+	f, err := openWatchdog()
 	if err != nil {
-		t.Fatalf("create fake wdev: %v", err)
+		t.Fatalf("openWatchdog: %v", err)
 	}
 	f.Close()
-	watchdogDev = dev
-	t.Cleanup(func() { watchdogDev = prev })
+	if !called {
+		t.Error("expected modprobe softdog to be invoked")
+	}
+}
 
-	w := StartWatchdog(time.Second)
-	if w == nil || w.fd == nil {
-		t.Fatal("expected kernel path")
+func TestOpenWatchdogFailsWhenSoftdogCantLoad(t *testing.T) {
+	prev := watchdogDev
+	prevModprobe := modprobeCmd
+	watchdogDev = filepath.Join(t.TempDir(), "watchdog-missing")
+	modprobeCmd = func() error { return errors.New("no softdog for you") }
+	t.Cleanup(func() {
+		watchdogDev = prev
+		modprobeCmd = prevModprobe
+	})
+
+	if _, err := openWatchdog(); err == nil {
+		t.Fatal("expected openWatchdog error")
 	}
-	defer w.Close()
-	if got := w.PetInterval(); got != 0 {
-		t.Errorf("kernel PetInterval = %v, want 0", got)
+}
+
+func TestEnsureWatchdogAvailableDisarms(t *testing.T) {
+	dev := fakeWatchdog(t)
+
+	if err := EnsureWatchdogAvailable(); err != nil {
+		t.Fatalf("EnsureWatchdogAvailable: %v", err)
 	}
-	w.Ping() // must not panic or block
+	data, err := os.ReadFile(dev)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if len(data) != 1 || data[0] != wdMagicClose {
+		t.Errorf("expected magic-close byte written; got %q", data)
+	}
 }

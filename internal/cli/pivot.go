@@ -141,6 +141,15 @@ func runPivot(ctx context.Context, cfg *config.Config, stdout interface {
 		slog.Info("tailscale pre-pivot auth ok")
 	}
 
+	// Check watchdog now, before we pivot. Same reasoning as tsnet
+	// preauth: fail while the old OS is still alive.
+	if cfg.WatchdogTimeout > 0 {
+		if err := postpivot.EnsureWatchdogAvailable(); err != nil {
+			return fmt.Errorf("--watchdog-timeout requested but %w — load softdog or drop the flag", err)
+		}
+		slog.Info("watchdog pre-pivot check ok")
+	}
+
 	// Memory headroom: warn before we commit to the pivot.
 	// (sysmem usage will be wired through when M5's RAM telemetry is
 	// surfaced via the slog output — for now we just verify the file
