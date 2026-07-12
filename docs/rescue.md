@@ -108,24 +108,26 @@ apk add --no-cache \
 exec /bin/sh
 ```
 
-### `Containerfile`
+### Overlay layout
 
-```dockerfile
-FROM docker.io/library/alpine:latest
-COPY entrypoint.sh /entrypoint.sh
-ENTRYPOINT ["/entrypoint.sh"]
+```
+overlay/
+└── entrypoint.sh       # chmod +x
 ```
 
 ### Run
 
 ```sh
-sudo xmorph pivot --containerfile ./Containerfile \
+sudo xmorph pivot \
+  --image docker.io/library/alpine:latest \
+  --rootfs ./overlay/ \
+  --entrypoint /entrypoint.sh \
   --tailscale.authkey tskey-auth-xxxxx \
   --headless
 ```
 
 The image is cached at `/var/cache/xmorph` (override with
-`--cache-dir`). Subsequent pivots with the same Containerfile skip the
+`--cache-dir`). Subsequent pivots with the same base image skip the
 download and apk install, so the second pivot onward is instant.
 
 For a fleet: pre-warm the cache on boot with `xmorph build` (see the

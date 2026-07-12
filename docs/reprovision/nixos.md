@@ -12,7 +12,7 @@ from the `nixos/nix` container image. Your machine config is a flake.
 | `disko` / `disko-install` | `github:nix-community/disko` (community-standard, used by nixos-anywhere) |
 | Nixpkgs | `github:NixOS/nixpkgs` (your flake pins the revision) |
 | Binary cache | `cache.nixos.org` |
-| Config | Your own flake, baked into the Containerfile |
+| Config | Your own flake, layered in via `--rootfs` |
 
 ## Prerequisites
 
@@ -120,19 +120,25 @@ partition layout (bios_grub + ext4 root), and set
 `boot.loader.grub = { enable = true; device = "/dev/sda"; }` in
 `configuration.nix` instead of systemd-boot.
 
-### `Containerfile`
+### Overlay layout
 
-```dockerfile
-FROM docker.io/nixos/nix:latest
-COPY install.sh /install.sh
-COPY flake.nix disko.nix configuration.nix /flake/
-ENTRYPOINT ["/install.sh"]
+```
+overlay/
+├── install.sh          # chmod +x
+└── flake/
+    ├── flake.nix
+    ├── disko.nix
+    └── configuration.nix
 ```
 
 ## Run it
 
 ```sh
-sudo xmorph pivot --containerfile ./Containerfile --force
+sudo xmorph pivot \
+  --image docker.io/nixos/nix:latest \
+  --rootfs ./overlay/ \
+  --entrypoint /install.sh \
+  --force
 ```
 
 The first run will download every store path the flake transitively
@@ -141,8 +147,8 @@ needs into the in-RAM `/nix/store`. Size the tmpfs headroom accordingly
 
 ## What happens
 
-1. xmorph builds the OCI image (your flake gets baked into `/flake/`)
-   and pivots into it.
+1. xmorph pulls `nixos/nix:latest`, merges `./overlay/` (your flake and
+   entrypoint) on top, and pivots into the combined rootfs.
 2. `disko-install`:
    - Evaluates the flake's `nixosConfigurations.host`
    - Calls `disko` to partition `/dev/sda`, format, and mount under

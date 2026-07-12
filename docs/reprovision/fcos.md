@@ -9,7 +9,7 @@ using the official `coreos-installer` container.
 |---|---|
 | Installer image | `quay.io/coreos/coreos-installer:release` (built by the CoreOS project) |
 | FCOS disk image | `https://builds.coreos.fedoraproject.org/streams/<stream>.json` (downloaded by the installer at runtime) |
-| Config | Your own Ignition config, baked into the Containerfile |
+| Config | Your own Ignition config, layered in via `--rootfs` |
 
 No third-party hosting, no xmorph-hosted artifacts.
 
@@ -66,34 +66,33 @@ reboot -f 2>/dev/null || echo b > /proc/sysrq-trigger
 
 Make it executable: `chmod +x install.sh`.
 
-### `Containerfile`
+### Overlay layout
 
-```dockerfile
-FROM quay.io/coreos/coreos-installer:release
-COPY install.sh /install.sh
-COPY config.ign /etc/config.ign
-ENTRYPOINT ["/install.sh"]
+```
+overlay/
+├── install.sh          # chmod +x
+└── etc/
+    └── config.ign
 ```
 
 ## Run it
 
-From the directory containing `Containerfile`, `install.sh`, and `config.ign`:
+From the directory containing `overlay/`:
 
 ```sh
-sudo xmorph pivot --containerfile ./Containerfile
+sudo xmorph pivot \
+  --image quay.io/coreos/coreos-installer:release \
+  --rootfs ./overlay/ \
+  --entrypoint /install.sh
 ```
 
-For an unattended run (no confirmation prompt):
-
-```sh
-sudo xmorph pivot --containerfile ./Containerfile --force
-```
+For an unattended run (no confirmation prompt), add `--force`.
 
 ## What happens
 
-1. xmorph builds an OCI image from the Containerfile, layering your
-   `config.ign` and `install.sh` on top of `coreos-installer:release`.
-2. The image is extracted into a tmpfs in RAM.
+1. xmorph pulls `coreos-installer:release`, merges `./overlay/`
+   (`config.ign` + `install.sh`) on top, and extracts the combined tree
+   into a tmpfs in RAM.
 3. xmorph stops the running OS's services and `pivot_root`s into the
    new rootfs.
 4. `install.sh` runs `coreos-installer install`, which:
@@ -120,8 +119,8 @@ rpm-ostree status   # confirms FCOS is running
 - **4Kn disks**: pass `--architecture x86_64` is fine; the metal image
   has 512b-sector and 4K-native variants — pick `--image-url` explicitly
   if you have a 4Kn disk.
-- **Air-gapped install**: pass `--image-file /path/to/fcos.raw.xz` (baked
-  into your Containerfile) instead of letting the installer download.
+- **Air-gapped install**: pass `--image-file /path/to/fcos.raw.xz` (placed
+  under `overlay/` at the same path) instead of letting the installer download.
 - **`--insecure-ignition`** is required if your Ignition is fetched over
   plain HTTP at runtime (use `--ignition-url` + `--ignition-hash` instead).
 

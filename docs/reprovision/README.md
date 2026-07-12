@@ -24,8 +24,8 @@ from the project's own release infrastructure.
 
 xmorph does:
 
-- Pull an OCI image (or build one from a Containerfile)
-- Move it into a tmpfs in RAM
+- Pull an OCI image and optionally layer a local rootfs directory on top
+- Move the merged tree into a tmpfs in RAM
 - Coordinate with the init system to stop services
 - `pivot_root` into the in-RAM rootfs
 - Exec the entrypoint, which is your installer
@@ -68,11 +68,12 @@ xmorph does not:
 
 All five recipes follow the same shape:
 
-1. A `Containerfile` that bundles your install-time config into a public
-   upstream image.
-2. An entrypoint script that installs any extra tools the upstream image
+1. An **overlay directory** that holds your install-time config and
+   entrypoint script; xmorph merges it over a public upstream image.
+2. That **entrypoint script** installs any extra tools the upstream image
    lacks, runs the installer, and reboots.
-3. A `xmorph pivot --containerfile Containerfile` invocation.
+3. A `xmorph pivot --image <upstream> --rootfs ./overlay/ --entrypoint /install.sh`
+   invocation.
 
 The entrypoint script always ends with:
 
@@ -85,10 +86,9 @@ reboot -f 2>/dev/null || echo b > /proc/sysrq-trigger
 covers minimal images that don't ship a `reboot` binary. After this the
 firmware reloads from the freshly written disk into the new OS.
 
-A note on the Containerfiles below: xmorph's Containerfile parser does
-not currently support `RUN`, so any package installation has to happen in
-the entrypoint script at runtime (after pivot), not at image-build time.
-The recipes are written with this in mind.
+Package installation happens in the entrypoint script at runtime (after
+pivot), not at image-build time — xmorph doesn't build custom images from
+these recipes, it merges the overlay directory over the upstream one.
 
 ## Recovery
 

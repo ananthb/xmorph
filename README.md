@@ -1,8 +1,8 @@
 # xmorph
 
 Replaces a running Linux root filesystem with a new in-memory rootfs
-built from OCI (Docker) images, rootfs tarballs, and Containerfiles.
-The old root is kept around for inspection and modification.
+built from OCI (Docker) images and rootfs tarballs. The old root is
+kept around for inspection and modification.
 
 Works as a Linux rescue environment integrating with systemd's
 `rescue.target`. Supports headless mode with Tailscale for SSH access
@@ -91,16 +91,24 @@ sudo xmorph build --image alpine:latest -o my-image.oci
 sudo xmorph build --image alpine:latest -o my-image.oci --rootfs-output rootfs.tar.gz
 ```
 
-### Build from a Containerfile
+### Adding files to a public base image
+
+Instead of building a custom image, layer a local rootfs directory over
+a public base — xmorph merges them left-to-right at pivot time:
 
 ```sh
-sudo xmorph pivot --containerfile ./Containerfile
-sudo xmorph build --containerfile ./Dockerfile --context ./app/
+# overlay/ contains the files you want in the new rootfs (e.g. install.sh,
+# etc/config.ign). They land at the same path in the pivoted root.
+sudo xmorph pivot --image alpine:latest --rootfs ./overlay/ \
+  --entrypoint /install.sh
 ```
 
-Supported instructions: `FROM`, `COPY`, `ADD`, `ENV`, `WORKDIR`,
-`ENTRYPOINT`, `CMD`, `LABEL`, `ARG`, `EXPOSE`, `VOLUME`, `USER`.
-`RUN` is not yet supported.
+For a fully custom image, build one out-of-band (`podman build`, Nix
+`dockerTools`, etc.) and reference it by OCI ref:
+
+```sh
+sudo xmorph pivot --image ghcr.io/you/your-installer:tag
+```
 
 ### Headless mode with Tailscale
 
