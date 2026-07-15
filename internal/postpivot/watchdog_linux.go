@@ -5,9 +5,11 @@ package postpivot
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
-	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -38,7 +40,56 @@ var watchdogDev = "/dev/watchdog"
 // modprobeCmd auto-loads softdog when /dev/watchdog is absent. var
 // so tests can swap it for a fake.
 var modprobeCmd = func() error {
-	return exec.Command("modprobe", "softdog").Run()
+	return loadKernelModule("softdog")
+}
+
+// moduleInitCompressedFile is finit_module(2)'s MODULE_INIT_COMPRESSED_FILE
+// flag (kernel >= 5.17): let the kernel decompress a .ko.{zst,xz,gz}.
+const moduleInitCompressedFile = 0x4
+
+// loadKernelModule loads a kernel module by name via finit_module(2) —
+// natively, no shelling out to modprobe. It finds name.ko(.zst|.xz|.gz)
+// under /lib/modules/<uname -r>/ and hands the open file to the kernel.
+// softdog has no dependencies, so a single finit_module suffices.
+func loadKernelModule(name string) error {
+	var u unix.Utsname
+	if err := unix.Uname(&u); err != nil {
+		return fmt.Errorf("uname: %w", err)
+	}
+	base := filepath.Join("/lib/modules", unix.ByteSliceToString(u.Release[:]))
+
+	var koPath string
+	_ = filepath.WalkDir(base, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if n := d.Name(); n == name+".ko" || strings.HasPrefix(n, name+".ko.") {
+			koPath = p
+			return fs.SkipAll
+		}
+		return nil
+	})
+	if koPath == "" {
+		return fmt.Errorf("kernel module %q not found under %s", name, base)
+	}
+
+	f, err := os.Open(koPath)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", koPath, err)
+	}
+	defer f.Close()
+
+	var flags int
+	if filepath.Ext(koPath) != ".ko" { // compressed .ko.zst/.xz/.gz
+		flags = moduleInitCompressedFile
+	}
+	if err := unix.FinitModule(int(f.Fd()), "", flags); err != nil {
+		if errors.Is(err, unix.EEXIST) {
+			return nil // already loaded
+		}
+		return fmt.Errorf("finit_module %s: %w", koPath, err)
+	}
+	return nil
 }
 
 // EnsureWatchdogAvailable opens /dev/watchdog (loading softdog if

@@ -21,10 +21,10 @@ type ContainOptions struct {
 	Env        []string
 }
 
-// Contain re-execs Argv[0] inside an unshared mount+PID namespace,
-// using exec.Command with SysProcAttr.Cloneflags. Inside the child,
-// /dev /run /proc /sys get fresh mounts via SetupEssentials and the
-// shell is chrooted into NewRoot. No pivot_root.
+// Contain runs Entrypoint inside an unshared mount+PID namespace, using
+// exec.Command with SysProcAttr.Cloneflags. Inside the child, /dev /run
+// /proc /sys get fresh mounts via SetupEssentials and the entrypoint is
+// chrooted into NewRoot. No pivot_root.
 //
 // This is the M3 implementation; src/cmd/pivot.zig:338-373 calls
 // runz.run.runContainer which does the equivalent. Here we use the
@@ -39,9 +39,9 @@ func Contain(opts ContainOptions) error {
 
 	argv := append([]string{opts.Entrypoint}, opts.Args...)
 
-	// We run the entrypoint INSIDE the new namespace via a shell-style
-	// exec: spawn a /bin/sh -c that chroots and execs. Simpler than
-	// re-exec'ing xmorph itself with another sentinel.
+	// Run the entrypoint directly inside the new namespace — no /bin/sh
+	// wrapper and no xmorph re-exec. SysProcAttr below sets the clone
+	// flags (new mount+PID namespace) and chroots the child into NewRoot.
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout

@@ -45,6 +45,10 @@ func RelocateToTransientScope(description string) (string, error) {
 	props := []systemdProperty{
 		{Name: "Description", Value: dbus.MakeVariant(description)},
 		{Name: "PIDs", Value: dbus.MakeVariant([]uint32{uint32(os.Getpid())})},
+		// Survive `systemctl isolate`: the init coordinator isolates
+		// basic.target to stop services, which would otherwise stop our own
+		// scope and SIGKILL us mid-pivot.
+		{Name: "IgnoreOnIsolate", Value: dbus.MakeVariant(true)},
 		// Garbage-collect the scope once it goes inactive/failed rather
 		// than leaving a dead unit behind (we never stop it cleanly — the
 		// process pivots away).
