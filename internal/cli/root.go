@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"log/syslog"
 	"os"
 
 	xlog "github.com/ananthb/xmorph/internal/log"
@@ -28,6 +29,32 @@ var LogHandler *xlog.Handler
 func InstallLogger(level slog.Level, colors bool) {
 	LogHandler = xlog.NewHandler(os.Stderr, level, colors)
 	slog.SetDefault(slog.New(LogHandler))
+	attachSystemLogSink(LogHandler)
+}
+
+// attachSystemLogSink wires xmorph's log into the host's system log. When
+// journald is running it already captures our stderr (systemd's default
+// StandardError=journal), so we rely on that and add nothing. Otherwise we
+// connect to syslog (/dev/log) as an additional sink. Best-effort: a failure
+// to reach syslog just means no system-log copy.
+func attachSystemLogSink(h *xlog.Handler) {
+	if journaldPresent() {
+		return
+	}
+	if w, err := syslog.New(syslog.LOG_INFO|syslog.LOG_DAEMON, "xmorph"); err == nil {
+		h.AddSink(w)
+	}
+}
+
+// journaldPresent reports whether systemd-journald is running, in which case
+// our stderr is captured by the journal and no explicit sink is needed.
+func journaldPresent() bool {
+	for _, p := range []string{"/run/systemd/journal/socket", "/run/systemd/journal/stdout"} {
+		if _, err := os.Stat(p); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // NewRootCmd builds the top-level `xmorph` command with `pivot`, `build`,
@@ -40,7 +67,7 @@ func NewRootCmd(stdout, stderr io.Writer) *cobra.Command {
 		Long: `xmorph replaces a running Linux rootfs with a new in-memory rootfs
 built from OCI images and/or rootfs tarballs, by way of pivot_root(2).
 It coordinates with systemd/openrc/sysvinit to stop services first and
-supports headless operation over Tailscale (in-process via tsnet).`,
+supports unattended operation over Tailscale (in-process via tsnet).`,
 		Version:       helpers.Version,
 		SilenceUsage:  true,
 		SilenceErrors: false,

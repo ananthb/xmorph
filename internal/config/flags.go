@@ -67,9 +67,8 @@ func bindPivotOnly(fs *pflag.FlagSet, cfg *Config) {
 	fs.BoolVarP(&cfg.DryRun, "dry-run", "n", false, "show what would be done without executing")
 	fs.BoolVar(&cfg.SkipVerify, "skip-verify", false, "skip rootfs verification")
 	fs.StringVar(&cfg.CacheDir, "cache-dir", DefaultCacheDir, "cache directory for OCI layers")
-	fs.StringVar(&cfg.LogDir, "log-dir", DefaultLogDir, "log directory (headless mode)")
+	fs.StringVar(&cfg.LogDir, "log-dir", DefaultLogDir, "additional log-file directory; xmorph.log is written here and flushed into the new rootfs before pivot (empty: disabled)")
 	fs.BoolVar(&cfg.SystemdMode, "systemd-mode", false, "running as systemd unit (implies --no-init-coord and --force)")
-	fs.BoolVar(&cfg.Headless, "headless", false, "detach from terminal (implies --force)")
 	fs.BoolVar(&cfg.KeepFirewall, "keep-firewall", false, "keep existing firewall rules (default: flush before starting services)")
 	fs.DurationVar(&cfg.WatchdogTimeout, "watchdog-timeout", 0, "reset the box if the pivoted entrypoint hangs longer than this (0: disabled; uses /dev/watchdog when available, otherwise a userspace timer)")
 	fs.StringVar(&cfg.LogPersistDevice, "log-persist-device", "", "pre-pivot mount path holding the log directory (empty: old root)")
@@ -135,9 +134,6 @@ func (c *Config) Normalize(fs *pflag.FlagSet, positional []string, envLookup fun
 	// Implied flags: see src/config.zig:260-266.
 	if c.SystemdMode {
 		c.NoInitCoord = true
-		c.Force = true
-	}
-	if c.Headless {
 		c.Force = true
 	}
 
