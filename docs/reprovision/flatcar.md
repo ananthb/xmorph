@@ -113,6 +113,40 @@ To pin the Flatcar version explicitly:
 # then run xmorph as above.
 ```
 
+## Reprovisioning a remote host
+
+The `--force` invocation above assumes you can watch the console. On a
+headless box reached only over SSH, the pivot tears down the old OS's
+networking the moment services stop — the session that launched xmorph
+goes with it, and you're blind while `flatcar-install` rewrites the disk.
+Bring your own reachability into the in-RAM installer rootfs:
+
+```sh
+sudo xmorph pivot \
+  --image docker.io/alpine:latest \
+  --rootfs ./overlay/ \
+  --entrypoint /install.sh \
+  --tailscale.authkey tskey-auth-xxxxx \
+  --headless \
+  --watchdog-timeout 20m \
+  --force
+```
+
+- **`--tailscale.authkey`** joins the pivoted rootfs to your tailnet via
+  tsnet (userspace, so it survives losing the host's own networking).
+  Default `tailscale up` args are `--ssh --hostname=<host>-xmorph`, so the
+  host reappears as `<host>-xmorph` with Tailscale SSH while the installer
+  runs. Use `--tailscale.server` for a Headscale coordination server.
+  (Plain `--ssh.enable --ssh.authorized-keys` also starts an sshd in the
+  installer, but only helps if the rootfs still holds a routable address
+  after pivot — Tailscale doesn't depend on that.)
+- **`--headless`** detaches xmorph from the launching terminal (implies
+  `--force`), so an SSH disconnect doesn't kill the install mid-write.
+- **`--watchdog-timeout`** resets the box if the entrypoint hangs, turning
+  a wedged install into a reboot instead of a silent brick. Still keep an
+  out-of-band recovery path — `flatcar-install` failing before it writes a
+  working bootloader leaves the disk unbootable.
+
 ## What happens
 
 1. xmorph pulls `alpine:latest`, merges `./overlay/` on top, and pivots
