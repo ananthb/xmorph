@@ -40,9 +40,5 @@ func (c *Config) Validate(warnW io.Writer) error {
 		fmt.Fprintln(warnW, "Warning: --tailscale.image is deprecated and ignored — xmorph runs Tailscale via tsnet in-process")
 	}
 
-	if c.Headless && !c.TailscaleEnabled() && c.SSHPort == nil {
-		fmt.Fprintln(warnW, "Warning: --headless without remote access — ensure your entrypoint provides access")
-	}
-
 	return nil
 }

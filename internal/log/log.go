@@ -15,11 +15,13 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
-// Handler is an slog.Handler that writes formatted lines to both stderr
-// and an in-memory buffer. Safe for concurrent use.
+// Handler is an slog.Handler that writes each record to stderr (colored),
+// an in-memory buffer (for the pivot flush), and any additional sinks
+// registered via AddSink (uncolored). Safe for concurrent use.
 type Handler struct {
 	mu     sync.Mutex
 	stderr io.Writer
@@ -27,6 +29,15 @@ type Handler struct {
 	level  slog.Level
 	colors bool
 	scope  string
+	sinks  *sinkList
+}
+
+// sinkList holds the additional log sinks. It is shared by pointer across
+// handler clones (WithAttrs/WithGroup) so a sink registered on the root
+// handler is seen by every clone.
+type sinkList struct {
+	mu sync.Mutex
+	w  []io.Writer
 }
 
 // NewHandler returns a Handler. If stderr is nil, os.Stderr is used.
@@ -40,7 +51,20 @@ func NewHandler(stderr io.Writer, level slog.Level, colors bool) *Handler {
 		buf:    &bytes.Buffer{},
 		level:  level,
 		colors: colors,
+		sinks:  &sinkList{},
 	}
+}
+
+// AddSink registers an additional writer that receives every uncolored log
+// line, alongside stderr and the in-memory buffer. Shared across clones.
+// Safe for concurrent use; a nil writer is ignored.
+func (h *Handler) AddSink(w io.Writer) {
+	if w == nil {
+		return
+	}
+	h.sinks.mu.Lock()
+	h.sinks.w = append(h.sinks.w, w)
+	h.sinks.mu.Unlock()
 }
 
 func (h *Handler) Enabled(_ context.Context, lvl slog.Level) bool {
@@ -112,18 +136,32 @@ func (h *Handler) Handle(_ context.Context, r slog.Record) error {
 	})
 	fmt.Fprintln(h.stderr)
 
-	// Buffer line — never colored, same content otherwise.
-	fmt.Fprintf(h.buf, "[%s] ", tag)
-	if h.scope != "" {
-		fmt.Fprintf(h.buf, "[%s] ", h.scope)
+	// Uncolored line — identical content — to the in-memory buffer and
+	// every additional sink (file, syslog, …).
+	line := h.plainLine(tag, r)
+	h.buf.WriteString(line)
+	h.sinks.mu.Lock()
+	for _, w := range h.sinks.w {
+		_, _ = io.WriteString(w, line)
 	}
-	fmt.Fprint(h.buf, r.Message)
+	h.sinks.mu.Unlock()
+	return nil
+}
+
+// plainLine renders the uncolored "[TAG] [scope] message k=v …\n" form.
+func (h *Handler) plainLine(tag string, r slog.Record) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "[%s] ", tag)
+	if h.scope != "" {
+		fmt.Fprintf(&b, "[%s] ", h.scope)
+	}
+	b.WriteString(r.Message)
 	r.Attrs(func(a slog.Attr) bool {
-		fmt.Fprintf(h.buf, " %s=%v", a.Key, a.Value.Any())
+		fmt.Fprintf(&b, " %s=%v", a.Key, a.Value.Any())
 		return true
 	})
-	fmt.Fprintln(h.buf)
-	return nil
+	b.WriteByte('\n')
+	return b.String()
 }
 
 func (h *Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
@@ -153,6 +191,7 @@ func (h *Handler) clone() *Handler {
 		level:  h.level,
 		colors: h.colors,
 		scope:  h.scope,
+		sinks:  h.sinks,
 	}
 }
 

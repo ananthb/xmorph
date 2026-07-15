@@ -82,11 +82,15 @@ type Config struct {
 	DryRun      bool
 	SkipVerify  bool
 	NoCache     bool
-	Headless    bool
 
 	CacheDir string
 	WorkDir  string
-	LogDir   string
+
+	// LogDir is an additional on-disk log sink: xmorph mirrors its slog
+	// output to {LogDir}/xmorph.log (alongside stderr/journald and syslog)
+	// and flushes the in-memory buffer there just before pivot_root, so the
+	// pre-pivot log survives into the new rootfs. Empty disables the file sink.
+	LogDir string
 
 	Output       string // build subcommand: OCI layout output dir; empty = cache only
 	RootfsOutput string // build subcommand: optional rootfs tarball output

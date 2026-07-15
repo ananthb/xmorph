@@ -18,7 +18,6 @@ func TestDryRunOutputShape(t *testing.T) {
 		{Kind: config.LayerImage, Ref: "alpine"},
 		{Kind: config.LayerRootfs, Path: "/tmp/extra"},
 	}
-	cfg.Headless = true
 	cfg.TailscaleAuthkey = "tskey-auth-abcdefghijklmnopqrstuvwxyz"
 	cfg.TailscaleArgs = "--ssh --hostname=test-xmorph"
 	cfg.NoInitCoord = true // skip detector path so the test is hermetic
@@ -37,7 +36,6 @@ func TestDryRunOutputShape(t *testing.T) {
 		"Keep old root: /mnt/oldroot",
 		"Contain: false",
 		"Timeout: 30s",
-		"Mode: headless (will fork and detach, log to /var/log/xmorph.log)",
 		"Steps that would be performed:",
 		"  1. Build rootfs from image alpine",
 		"  2. Merge rootfs /tmp/extra",

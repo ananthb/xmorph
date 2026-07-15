@@ -45,10 +45,6 @@ func printDryRun(w io.Writer, cfg *config.Config) {
 	if cfg.LogPersistPath != "" {
 		fmt.Fprintf(w, "Persistent logs: %s\n", filepath.Join("/", cfg.LogPersistDevice, cfg.LogPersistPath))
 	}
-	if cfg.Headless {
-		fmt.Fprintf(w, "Mode: headless (will fork and detach, log to /var/log/xmorph.log)\n")
-	}
-
 	fmt.Fprintf(w, "\nSteps that would be performed:\n")
 	step := 1
 

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/ananthb/xmorph/internal/config"
-	"github.com/ananthb/xmorph/internal/daemon"
 	"github.com/ananthb/xmorph/internal/helpers"
 	"github.com/ananthb/xmorph/internal/initsys"
 	"github.com/ananthb/xmorph/internal/oci"
@@ -55,7 +54,8 @@ arguments that would otherwise be interpreted as flags.`,
 //
 //  1. --dry-run        → print plan, return.
 //  2. --contain        → build rootfs, run inside mount+PID namespace.
-//  3. --headless       → fork via daemon.Daemonize (parent prints PID, exits).
+//  3. Detach: on systemd, relocate into a transient scope so the launching
+//     session/service can't reap us; warn if over SSH and undetached.
 //  4. Build rootfs.
 //  5. Resolve entrypoint from cfg + merged ImageConfig.
 //  6. Write /etc/xmorph-init.json + copy binary to new rootfs.
@@ -83,19 +83,56 @@ func runPivot(ctx context.Context, cfg *config.Config, stdout interface {
 		return errors.New("pivot requires root (CAP_SYS_ADMIN for namespace + pivot_root)")
 	}
 
-	// --force or --headless skips confirmation. Plan plus the existing
-	// implied-flag rule (`--headless` ⇒ `--force`) means we only need
-	// to ask if neither is set.
+	// --force skips the interactive confirmation.
 	if !cfg.Force {
-		fmt.Fprintln(os.Stderr, "Refusing to pivot without --force or --headless")
-		return errors.New("confirmation required (--force or --headless)")
+		fmt.Fprintln(os.Stderr, "Refusing to pivot without --force")
+		return errors.New("confirmation required (--force)")
 	}
 
-	if cfg.Headless {
-		if err := daemon.Daemonize(cfg.LogDir); err != nil {
-			return fmt.Errorf("daemonize: %w", err)
+	slog.Info("pivot starting", "layers", len(cfg.Layers), "work_dir", cfg.WorkDir,
+		"systemd_mode", cfg.SystemdMode, "watchdog", cfg.WatchdogTimeout)
+
+	// Attach the on-disk log sink now so everything below is captured there
+	// too; the same buffer is flushed into the new rootfs before pivot_root.
+	if cfg.LogDir != "" && LogHandler != nil {
+		logFile := filepath.Join(cfg.LogDir, "xmorph.log")
+		if err := os.MkdirAll(cfg.LogDir, 0o755); err != nil {
+			slog.Warn("log-dir mkdir failed; file logging disabled", "dir", cfg.LogDir, "err", err)
+		} else if f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err != nil {
+			slog.Warn("log-dir open failed; file logging disabled", "path", logFile, "err", err)
+		} else {
+			LogHandler.AddSink(f)
+			slog.Info("file logging enabled", "path", logFile)
 		}
-		// Past here we're the daemonized child.
+	}
+
+	// Detach from the launching session so the pivot outlives it. On
+	// systemd we ask systemd to adopt us into a transient scope — like
+	// `systemd-run --scope`, but for the running process — which moves us
+	// out of a run0/systemd-run .service or SSH session scope that would
+	// otherwise SIGKILL us on teardown. No fork, no exec. Skipped under
+	// --systemd-mode: there we're already a managed unit.
+	detached := false
+	if !cfg.SystemdMode && initsys.Detect() == initsys.Systemd {
+		if scope, err := initsys.RelocateToTransientScope("xmorph pivot into a new in-memory rootfs"); err != nil {
+			slog.Warn("could not relocate into a transient systemd scope; a mid-pivot disconnect may kill xmorph", "err", err)
+		} else {
+			detached = true
+			slog.Info("relocated into transient systemd scope", "unit", scope)
+		}
+	}
+
+	// Over SSH the pivot severs this connection. If we couldn't detach
+	// (non-systemd host, or the relocation failed), a disconnect during the
+	// pivot can take xmorph with it — warn and give a grace window to abort.
+	if initsys.RunningOverSSH() {
+		if detached {
+			slog.Warn("over SSH: this session will drop during the pivot, but xmorph is detached and will continue — reconnect via your entrypoint's access (e.g. Tailscale/SSH in the new rootfs)")
+		} else {
+			const grace = 10 * time.Second
+			slog.Warn("over SSH and NOT detached from this session — if you disconnect during the pivot xmorph may be killed; prefer --systemd-mode under `systemd-run`. Continuing shortly; press Ctrl-C to abort", "grace", grace)
+			time.Sleep(grace)
+		}
 	}
 
 	if err := os.MkdirAll(cfg.WorkDir, 0o755); err != nil {
@@ -110,6 +147,7 @@ func runPivot(ctx context.Context, cfg *config.Config, stdout interface {
 	slog.Info("rootfs built", "layers", result.LayerCount)
 
 	entrypoint, entryArgs, _ := resolveEntrypoint(cfg, result.Config)
+	slog.Info("entrypoint resolved", "entrypoint", entrypoint, "args", len(entryArgs))
 
 	// Write the postpivot config (read back by `xmorph --init`) and copy
 	// the running binary into the new rootfs.
@@ -120,6 +158,7 @@ func runPivot(ctx context.Context, cfg *config.Config, stdout interface {
 	if err := postpivot.CopyBinary(cfg.WorkDir); err != nil {
 		return fmt.Errorf("copy binary: %w", err)
 	}
+	slog.Info("staged post-pivot config and binary", "work_dir", cfg.WorkDir)
 
 	// Pre-pivot tailscale auth: validate the authkey against the live
 	// network NOW, while the old OS is still working. On success the
@@ -225,9 +264,11 @@ func runPivot(ctx context.Context, cfg *config.Config, stdout interface {
 		}
 	}
 
+	slog.Info("pivoting root", "new_root", cfg.WorkDir, "old_root", "/"+oldRootRel)
 	if err := pivot.PivotRoot(cfg.WorkDir, oldRootRel); err != nil {
 		return fmt.Errorf("pivot_root: %w", err)
 	}
+	slog.Info("pivot_root complete; old root at /" + oldRootRel)
 
 	if cfg.KeepOldRoot == "" {
 		slog.Info("unmounting old root")
@@ -239,6 +280,7 @@ func runPivot(ctx context.Context, cfg *config.Config, stdout interface {
 	}
 
 	// Exec the post-pivot supervisor: /usr/local/bin/xmorph --init <argv>.
+	slog.Info("exec post-pivot supervisor", "binary", postpivot.BinaryPath, "entrypoint", entrypoint)
 	supervisorArgv := append([]string{postpivot.BinaryPath, "--init", entrypoint}, entryArgs...)
 	if err := unix.Exec(postpivot.BinaryPath, supervisorArgv, os.Environ()); err != nil {
 		return fmt.Errorf("exec post-pivot supervisor: %w", err)

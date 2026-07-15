@@ -7,9 +7,24 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 )
+
+// lockedWriter serializes concurrent writes to w. os/exec copies the
+// child's stdout and stderr on separate goroutines; when both tee into the
+// same LogWriter their writes must not race or interleave.
+type lockedWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (l *lockedWriter) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.w.Write(p)
+}
 
 // SuperviseOptions configures Supervise.
 type SuperviseOptions struct {
@@ -44,8 +59,11 @@ func Supervise(opts SuperviseOptions) (exitCode int, err error) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if opts.LogWriter != nil {
-		cmd.Stdout = io.MultiWriter(os.Stdout, opts.LogWriter)
-		cmd.Stderr = io.MultiWriter(os.Stderr, opts.LogWriter)
+		// Share one locked writer between the two tees so the stdout- and
+		// stderr-copy goroutines don't race on LogWriter.
+		lw := &lockedWriter{w: opts.LogWriter}
+		cmd.Stdout = io.MultiWriter(os.Stdout, lw)
+		cmd.Stderr = io.MultiWriter(os.Stderr, lw)
 	}
 	if opts.Env != nil {
 		cmd.Env = opts.Env

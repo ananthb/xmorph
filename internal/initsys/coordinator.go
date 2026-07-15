@@ -5,9 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
-	"strings"
 	"time"
+
+	"github.com/godbus/dbus/v5"
+)
+
+const (
+	systemdDest = "org.freedesktop.systemd1"
+	systemdPath = dbus.ObjectPath("/org/freedesktop/systemd1")
 )
 
 // Coordinator gracefully transitions the running init system to a
@@ -29,16 +34,30 @@ func NewCoordinator(timeout time.Duration) Coordinator {
 // shouldn't abort the pivot (the process terminator catches what
 // the init system missed).
 func (c Coordinator) TransitionToRescue() error {
-	switch c.Kind {
-	case Systemd:
-		// basic.target keeps journal + dbus up but stops all user
-		// services. rescue.target would additionally start sulogin
-		// on the console.
-		return c.run("systemctl", "isolate", "basic.target")
-	case OpenRC:
-		return c.run("openrc", "single")
-	case SysVinit:
-		return c.run("telinit", "1")
+	if c.Kind == Systemd {
+		// basic.target keeps journald + dbus up but stops user services;
+		// "isolate" stops everything the target doesn't require. Done over
+		// D-Bus rather than shelling out to systemctl.
+		return systemdStartUnit("basic.target", "isolate")
+	}
+	// OpenRC/SysVinit/runit/… expose no native control channel we can talk
+	// to without shelling out, and the transition is advisory anyway: the
+	// native process terminator (process.Terminate) stops what's running.
+	return nil
+}
+
+// systemdStartUnit invokes Manager.StartUnit(name, mode) on the system bus.
+func systemdStartUnit(name, mode string) error {
+	conn, err := dbus.ConnectSystemBus()
+	if err != nil {
+		return fmt.Errorf("connect system bus: %w", err)
+	}
+	defer conn.Close()
+	var job dbus.ObjectPath
+	if err := conn.Object(systemdDest, systemdPath).Call(
+		systemdDest+".Manager.StartUnit", 0, name, mode,
+	).Store(&job); err != nil {
+		return fmt.Errorf("StartUnit %s (%s): %w", name, mode, err)
 	}
 	return nil
 }
@@ -52,9 +71,16 @@ func (c Coordinator) WaitForServicesToStop() error {
 		time.Sleep(min(c.Timeout, 2*time.Second))
 		return nil
 	}
+	conn, err := dbus.ConnectSystemBus()
+	if err != nil {
+		return nil // can't measure; trust the timeout
+	}
+	defer conn.Close()
+	mgr := conn.Object(systemdDest, systemdPath)
+
 	deadline := time.Now().Add(c.Timeout)
 	for time.Now().Before(deadline) {
-		n, err := c.systemdPendingJobs()
+		n, err := systemdJobCount(mgr)
 		if err != nil {
 			return nil // can't measure; trust the timeout
 		}
@@ -66,28 +92,23 @@ func (c Coordinator) WaitForServicesToStop() error {
 	return errors.New("timeout waiting for services to stop")
 }
 
-func (c Coordinator) systemdPendingJobs() (int, error) {
-	out, err := exec.Command("systemctl", "list-jobs", "--no-legend").Output()
-	if err != nil {
-		return 0, err
-	}
-	n := 0
-	for _, line := range strings.Split(string(out), "\n") {
-		if strings.TrimSpace(line) != "" {
-			n++
-		}
-	}
-	return n, nil
+// systemdJob mirrors one entry of Manager.ListJobs (D-Bus a(usssoo)).
+type systemdJob struct {
+	ID       uint32
+	Unit     string
+	Type     string
+	State    string
+	JobPath  dbus.ObjectPath
+	UnitPath dbus.ObjectPath
 }
 
-func (c Coordinator) run(argv ...string) error {
-	cmd := exec.Command(argv[0], argv[1:]...)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s: %w (%s)", strings.Join(argv, " "), err, strings.TrimSpace(stderr.String()))
+// systemdJobCount returns the number of jobs systemd currently has queued.
+func systemdJobCount(mgr dbus.BusObject) (int, error) {
+	var jobs []systemdJob
+	if err := mgr.Call(systemdDest+".Manager.ListJobs", 0).Store(&jobs); err != nil {
+		return 0, err
 	}
-	return nil
+	return len(jobs), nil
 }
 
 // ShouldSkipCoordination is true when we're inside a container — the

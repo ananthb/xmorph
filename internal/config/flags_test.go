@@ -83,12 +83,6 @@ func TestParsePivotImpliedFlags(t *testing.T) {
 		t.Errorf("--systemd-mode: SystemdMode=%v NoInitCoord=%v Force=%v",
 			cfg.SystemdMode, cfg.NoInitCoord, cfg.Force)
 	}
-
-	// --headless implies --force (src/config.zig:264-266).
-	cfg = parsePivot(t, []string{"--headless"}, nil)
-	if !cfg.Headless || !cfg.Force {
-		t.Errorf("--headless: Headless=%v Force=%v", cfg.Headless, cfg.Force)
-	}
 }
 
 func TestParsePivotSSHEnable(t *testing.T) {
