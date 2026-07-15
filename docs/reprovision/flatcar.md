@@ -113,6 +113,47 @@ To pin the Flatcar version explicitly:
 # then run xmorph as above.
 ```
 
+## Reprovisioning a remote host
+
+The `--force` invocation above assumes you can watch the console. On a box
+reached only over SSH, the pivot tears down the old OS's networking the
+moment services stop — the session that launched xmorph goes with it, and
+you're blind while `flatcar-install` rewrites the disk. Two things to
+arrange: staying reachable, and not getting killed with the session.
+
+```sh
+sudo xmorph pivot \
+  --image docker.io/alpine:latest \
+  --rootfs ./overlay/ \
+  --entrypoint /install.sh \
+  --tailscale.authkey tskey-auth-xxxxx \
+  --watchdog-timeout 20m \
+  --force
+```
+
+- **`--tailscale.authkey`** joins the pivoted rootfs to your tailnet via
+  tsnet (userspace, so it survives losing the host's own networking).
+  Default `tailscale up` args are `--ssh --hostname=<host>-xmorph`, so the
+  host reappears as `<host>-xmorph` with Tailscale SSH while the installer
+  runs. Use `--tailscale.server` for a Headscale coordination server.
+  (Plain `--ssh.enable --ssh.authorized-keys` also starts an sshd in the
+  installer, but only helps if the rootfs still holds a routable address
+  after pivot — Tailscale doesn't depend on that.)
+- **Surviving the disconnect is automatic on systemd.** Before it builds
+  the rootfs, xmorph relocates itself into a transient systemd scope (via
+  `StartTransientUnit`, like `systemd-run --scope`), so the launching SSH
+  session — or a `run0`/`systemd-run` wrapper — ending won't take the
+  install down with it. If xmorph *can't* detach (non-systemd host, or the
+  relocation fails) it warns and pauses a grace window first.
+- **Driving it from a unit?** If you launch via a systemd unit yourself
+  (`systemd-run --unit xmorph-pivot -- xmorph pivot …`, or a
+  `rescue.target` unit), pass **`--systemd-mode`** instead: it skips the
+  self-relocation and init coordination and implies `--force`.
+- **`--watchdog-timeout`** resets the box if the entrypoint hangs, turning
+  a wedged install into a reboot instead of a silent brick. Still keep an
+  out-of-band recovery path — `flatcar-install` failing before it writes a
+  working bootloader leaves the disk unbootable.
+
 ## What happens
 
 1. xmorph pulls `alpine:latest`, merges `./overlay/` on top, and pivots
