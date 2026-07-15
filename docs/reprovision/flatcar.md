@@ -115,11 +115,11 @@ To pin the Flatcar version explicitly:
 
 ## Reprovisioning a remote host
 
-The `--force` invocation above assumes you can watch the console. On a
-headless box reached only over SSH, the pivot tears down the old OS's
-networking the moment services stop — the session that launched xmorph
-goes with it, and you're blind while `flatcar-install` rewrites the disk.
-Bring your own reachability into the in-RAM installer rootfs:
+The `--force` invocation above assumes you can watch the console. On a box
+reached only over SSH, the pivot tears down the old OS's networking the
+moment services stop — the session that launched xmorph goes with it, and
+you're blind while `flatcar-install` rewrites the disk. Two things to
+arrange: staying reachable, and not getting killed with the session.
 
 ```sh
 sudo xmorph pivot \
@@ -127,7 +127,6 @@ sudo xmorph pivot \
   --rootfs ./overlay/ \
   --entrypoint /install.sh \
   --tailscale.authkey tskey-auth-xxxxx \
-  --headless \
   --watchdog-timeout 20m \
   --force
 ```
@@ -140,8 +139,16 @@ sudo xmorph pivot \
   (Plain `--ssh.enable --ssh.authorized-keys` also starts an sshd in the
   installer, but only helps if the rootfs still holds a routable address
   after pivot — Tailscale doesn't depend on that.)
-- **`--headless`** detaches xmorph from the launching terminal (implies
-  `--force`), so an SSH disconnect doesn't kill the install mid-write.
+- **Surviving the disconnect is automatic on systemd.** Before it builds
+  the rootfs, xmorph relocates itself into a transient systemd scope (via
+  `StartTransientUnit`, like `systemd-run --scope`), so the launching SSH
+  session — or a `run0`/`systemd-run` wrapper — ending won't take the
+  install down with it. If xmorph *can't* detach (non-systemd host, or the
+  relocation fails) it warns and pauses a grace window first.
+- **Driving it from a unit?** If you launch via a systemd unit yourself
+  (`systemd-run --unit xmorph-pivot -- xmorph pivot …`, or a
+  `rescue.target` unit), pass **`--systemd-mode`** instead: it skips the
+  self-relocation and init coordination and implies `--force`.
 - **`--watchdog-timeout`** resets the box if the entrypoint hangs, turning
   a wedged install into a reboot instead of a silent brick. Still keep an
   out-of-band recovery path — `flatcar-install` failing before it writes a
