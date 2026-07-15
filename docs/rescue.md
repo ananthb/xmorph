@@ -28,18 +28,23 @@ broken on disk without rebooting from external media.
 sudo xmorph pivot \
   --image docker.io/library/alpine:latest \
   --tailscale.authkey tskey-auth-xxxxx \
-  --headless
+  --force
 ```
 
 What this does:
 
 1. Pulls Alpine + the Tailscale image into a tmpfs in RAM
-2. Coordinates with systemd / OpenRC / SysVinit to stop services
-3. `pivot_root`s into the new rootfs
-4. Forks and detaches so your current SSH session can close cleanly
+2. On a systemd host, relocates itself into a transient scope so your SSH
+   session (or a `run0`/`systemd-run` wrapper) can't take it down when it
+   ends — see [Surviving your SSH session](#surviving-your-ssh-session)
+3. Coordinates with systemd / OpenRC / SysVinit to stop services
+4. `pivot_root`s into the new rootfs
 5. Brings up Tailscale in the new rootfs; the node appears as
    `<hostname>-xmorph` on your tailnet
 6. Mounts the old root at `/mnt/oldroot`
+
+Your SSH session drops when the pivot tears down the old OS's networking —
+that's expected. You reconnect to the rescue node over Tailscale.
 
 From your laptop:
 
@@ -123,7 +128,7 @@ sudo xmorph pivot \
   --rootfs ./overlay/ \
   --entrypoint /entrypoint.sh \
   --tailscale.authkey tskey-auth-xxxxx \
-  --headless
+  --force
 ```
 
 The image is cached at `/var/cache/xmorph` (override with
@@ -142,7 +147,7 @@ Tailscale's hosted control plane, point `--tailscale.server` at it:
 sudo xmorph pivot --image alpine \
   --tailscale.authkey <key-from-headscale> \
   --tailscale.server https://headscale.example.com \
-  --headless
+  --force
 ```
 
 This appends `--login-server=https://headscale.example.com` to the
@@ -154,14 +159,14 @@ If you have a routable IP (static, or DHCP with known address) or you're
 on a serial console:
 
 ```sh
-# Plain dropbear SSH on port 22 with your key
+# Plain SSH on port 22 with your key
 sudo xmorph pivot --image alpine \
   --ssh.port 22 \
-  --ssh.keyfile ~/.ssh/id_ed25519.pub \
-  --headless
+  --ssh.authorized-keys "$(cat ~/.ssh/id_ed25519.pub)" \
+  --force
 
-# Already on a serial console — just stay attached, no --headless
-sudo xmorph pivot --image alpine
+# Already on a serial console — just stay attached and watch it run
+sudo xmorph pivot --image alpine --force
 ```
 
 The `--ssh.enable` path stands up a small pure-Go OpenSSH server inside
@@ -176,18 +181,43 @@ up across the pivot, but if the broken OS had odd routing or firewall
 rules, those die with it. The firewall is flushed by default during
 pivot; pass `--keep-firewall` to keep it.
 
-## Headless flag details
+## Surviving your SSH session
 
-`--headless` is what makes rescue-from-an-existing-SSH-session work. It:
+Rescuing from an existing SSH session works without any special flag. The
+risk it guards against is your login session — or a `run0`/`systemd-run`
+wrapper — being a systemd unit that gets torn down (with
+`KillMode=control-group`) the moment it ends, which would SIGKILL xmorph
+mid-pivot.
 
-- Forks and `setsid()`s so the parent (your SSH session) can return
-- Closes stdin/stdout/stderr — your shell prompt comes back immediately
-- Logs to `/var/log/xmorph.log` in the new rootfs
-- Prints the new Tailscale hostname (and PID) before forking so you know
-  where to reconnect
-- Implies `--force` (no interactive confirmation prompt)
-- Requires at least one of `--tailscale.authkey` or `--ssh.port` — without
-  a way to reach the rescued box, you'd lock yourself out
+On a **systemd** host, xmorph handles this automatically: before it starts
+building the rootfs it asks systemd to adopt the running process into a
+transient scope (`xmorph-<pid>.scope`) — the same move `systemd-run
+--scope` makes, but for the already-running process. That scope is
+systemd-owned and independent of your session, so the pivot survives the
+session ending. No fork, no re-exec; systemd just reassigns the cgroup.
+
+xmorph also notices when it's running over SSH:
+
+- If it detached into a scope, it logs a reminder that the session will
+  drop during the pivot and you should reconnect via Tailscale/SSH in the
+  new rootfs.
+- If it could **not** detach (a non-systemd host, or the relocation
+  failed), it warns that a disconnect may kill the pivot and pauses for a
+  short grace window — `Ctrl-C` to abort. On those hosts, run it under a
+  detachment mechanism of your own (`systemd-run`, `setsid`, `nohup`, `tmux`).
+
+Make sure you have a way back in before you pivot: set `--tailscale.authkey`
+or `--ssh.port`, or you'll lock yourself out. `--log-dir` (default
+`/var/log`) writes `xmorph.log` on the old root and flushes it into the new
+rootfs, so there's a breadcrumb trail either way.
+
+### Running as a managed unit
+
+If you drive the pivot from a systemd unit yourself — a `rescue.target`
+unit, or `systemd-run --unit xmorph-pivot -- xmorph pivot …` — pass
+`--systemd-mode` instead. It skips the self-relocation and the init
+coordination (systemd already stopped services on the way into the target)
+and implies `--force`. See [systemd integration](systemd.md).
 
 ## Auto-reset on hang
 
@@ -199,7 +229,7 @@ back on the original OS.
 ```sh
 sudo xmorph pivot --image alpine --rootfs ./overlay/ \
   --entrypoint /install.sh \
-  --watchdog-timeout 5m --headless \
+  --watchdog-timeout 5m --force \
   --tailscale.authkey tskey-auth-xxxxx
 ```
 
