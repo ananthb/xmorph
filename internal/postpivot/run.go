@@ -32,6 +32,12 @@ func Run(argv []string) int {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "xmorph --init: warning: %v\n", err)
 	}
+	// The config carries the SSH password and Tailscale auth key; now that
+	// it's in memory, remove it from the rootfs so it doesn't linger
+	// world-visible for the life of the pivoted system.
+	if err := os.Remove(ConfigPath); err != nil && !os.IsNotExist(err) {
+		slog.Warn("could not remove init config after load", "path", ConfigPath, "err", err)
+	}
 
 	if cfg != nil && cfg.FlushFirewall {
 		FlushFirewall()

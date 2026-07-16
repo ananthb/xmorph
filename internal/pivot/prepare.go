@@ -33,14 +33,22 @@ func Prepare(opts PrepareOptions) error {
 			return err
 		}
 	}
-	if err := SetupEssentials(opts.NewRoot); err != nil {
-		return fmt.Errorf("setup essentials: %w", err)
+	// Make newRoot a real mount point FIRST, then mount the essentials on
+	// top of it. Order matters: a non-recursive self-bind stacks a fresh
+	// mount over newRoot that does not carry child mounts, so if the
+	// essentials were mounted first they would be shadowed by the self-bind
+	// and the pivoted system would come up with no /proc, /sys, or /dev.
+	// (This is why pivot_root recipes always bind the new root onto itself
+	// before populating it.) pivot_root also requires newRoot to be a mount
+	// point, which this satisfies.
+	if err := EnsureMountPoint(opts.NewRoot); err != nil {
+		return fmt.Errorf("bind new root onto itself: %w", err)
 	}
-	// Self-bind so pivot_root sees newRoot as a real mount point. The
-	// kernel rejects pivot_root unless this holds.
-	_ = EnsureMountPoint(opts.NewRoot) // tolerated: already-mounted is OK
 	if err := MakePrivate(opts.NewRoot); err != nil {
 		return fmt.Errorf("make new root private: %w", err)
+	}
+	if err := SetupEssentials(opts.NewRoot); err != nil {
+		return fmt.Errorf("setup essentials: %w", err)
 	}
 	return nil
 }

@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/ananthb/xmorph/internal/config"
@@ -135,6 +137,18 @@ func runPivot(ctx context.Context, cfg *config.Config, stdout interface {
 		}
 	}
 
+	// From here on a dropped controlling session must not take xmorph with
+	// it. The transient-scope relocation above only fixes cgroup reaping; it
+	// does NOT detach the controlling TTY, so when the pivot severs the SSH
+	// connection (or init coordination stops sshd) the kernel delivers SIGHUP
+	// to this process group, whose default disposition is fatal. SIGPIPE is
+	// the same story for a slog write to a stderr fd whose reader just died.
+	// Ignore both now — we have already committed to proceeding (the SSH
+	// grace window above was the last chance to abort). SIGINT/SIGTERM are
+	// left alone until the destructive steps below so local Ctrl-C still
+	// aborts a long rootfs build.
+	signal.Ignore(syscall.SIGHUP, syscall.SIGPIPE)
+
 	if err := os.MkdirAll(cfg.WorkDir, 0o755); err != nil {
 		return fmt.Errorf("create work dir: %w", err)
 	}
@@ -206,6 +220,12 @@ func runPivot(ctx context.Context, cfg *config.Config, stdout interface {
 	// (sysmem usage will be wired through when M5's RAM telemetry is
 	// surfaced via the slog output — for now we just verify the file
 	// is readable.)
+
+	// Point of no safe abort: everything below stops services, terminates
+	// userspace, and pivots. A stray Ctrl-C or a SIGTERM from a supervising
+	// unit here would strand the machine with services down and no new root,
+	// so stop honoring them now (SIGHUP/SIGPIPE were already ignored above).
+	signal.Ignore(syscall.SIGINT, syscall.SIGTERM)
 
 	if !cfg.SystemdMode {
 		if !cfg.NoInitCoord && !initsys.ShouldSkipCoordination() {

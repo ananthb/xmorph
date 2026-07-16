@@ -64,7 +64,13 @@ func WriteConfig(rootfsRoot string, cfg *Config) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("mkdir for config: %w", err)
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	// 0600: this file holds the SSH root password and Tailscale auth key, so
+	// it must not be readable by unprivileged processes the entrypoint spawns.
+	// Run also unlinks it once loaded. O_EXCL after a best-effort remove keeps
+	// a pre-existing (possibly attacker-planted, wrong-mode) file from being
+	// reused. Mirrors the secret-handling intent of the pre-pivot staging.
+	_ = os.Remove(path)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return fmt.Errorf("open config: %w", err)
 	}

@@ -58,6 +58,32 @@
           };
         };
 
+        # Integration test binaries that need a real kernel + root to run
+        # (mount namespaces, pivot_root). They are compiled here but executed
+        # inside the NixOS VM test below — the nix build sandbox can't do
+        # mounts, and GitHub CI has no Apple `container`. Developers on macOS
+        # can run the same binaries under `container`; see docs/testing.md.
+        xmorphIntegrationTests = buildGoModule {
+          pname = "xmorph-integration-tests";
+          inherit version vendorHash;
+          src = ./.;
+          env.CGO_ENABLED = "0";
+          doCheck = false;
+          buildPhase = ''
+            runHook preBuild
+            for pkg in pivot oci; do
+              go test -c -o "xmorph-$pkg.test" "./internal/$pkg"
+            done
+            runHook postBuild
+          '';
+          installPhase = ''
+            runHook preInstall
+            mkdir -p "$out/bin"
+            install -m555 xmorph-*.test "$out/bin/"
+            runHook postInstall
+          '';
+        };
+
         # xmorphLint: gofmt + go vet gate. Exposed as `apps.lint` so the
         # pre-commit hook and CI both go through `nix run .#lint`.
         xmorphLint = pkgs.writeShellApplication {
@@ -198,6 +224,29 @@
               machine.wait_for_unit("xmorph-test-rootfs.service")
               machine.succeed("test -f /var/lib/xmorph-test/rootfs.tar.gz")
               machine.wait_for_unit("xmorph-cache-warm.service")
+            '';
+          };
+
+          # NixOS VM test: real pivot_root + mount ordering on a live kernel.
+          # Runs the pivot/oci integration test binaries as root inside the VM
+          # — this is the project's real-kernel coverage of the pivot path
+          # (the nix sandbox can't do mount namespaces). Guards the
+          # mount-ordering fix: essentials must stay visible after the pivot.
+          nixos-pivot = pkgs.testers.nixosTest {
+            name = "xmorph-pivot-integration";
+
+            nodes.machine = { ... }: {
+              environment.systemPackages = [ xmorphIntegrationTests ];
+              virtualisation.memorySize = 2048;
+            };
+
+            testScript = ''
+              machine.wait_for_unit("multi-user.target")
+              # pivot_root + mount-ordering (needs root + CAP_SYS_ADMIN).
+              machine.succeed("xmorph-pivot.test -test.v")
+              # tar-extraction containment + setuid, exercised as root — the
+              # privilege level at which a symlink escape would actually bite.
+              machine.succeed("xmorph-oci.test -test.v")
             '';
           };
 

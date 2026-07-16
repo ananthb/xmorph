@@ -3,35 +3,49 @@
 let
   cfg = config.services.xmorph;
 
-  # Common layer args shared between pivot and build
-  layerArgs =
-    (map (img: "--image ${img}") cfg.images)
-    ++ (map (r: "--rootfs ${r}") cfg.rootfs)
+  # Args accepted by BOTH `build` and `pivot`. SSH flags are deliberately
+  # NOT here: the build subcommand doesn't bind them (`xmorph build --ssh.enable`
+  # errors with "unknown flag"), so they must go to `pivot` only.
+  commonArgs =
+    (map (img: "--image=${img}") cfg.images)
+    ++ (map (r: "--rootfs=${r}") cfg.rootfs)
     ++ lib.optional cfg.tailscale.enable "--tailscale.enable"
-    ++ lib.optional (cfg.tailscale.enable && cfg.tailscale.authKeyFile != null)
-      "--tailscale.authkey=$(cat ${cfg.tailscale.authKeyFile})"
     ++ lib.optional (cfg.tailscale.enable && cfg.tailscale.server != null) "--tailscale.server=${cfg.tailscale.server}"
-    ++ lib.optional (cfg.tailscale.enable && cfg.tailscale.args != null) "--tailscale.args='${cfg.tailscale.args}'"
-    ++ lib.optional cfg.ssh.enable "--ssh.enable"
-    ++ lib.optional (cfg.ssh.enable && cfg.ssh.port != null) "--ssh.port=${toString cfg.ssh.port}"
-    ++ lib.optional (cfg.ssh.enable && cfg.ssh.password != null) "--ssh.password=${cfg.ssh.password}"
-    ++ lib.optional (cfg.ssh.enable && cfg.ssh.authorizedKeys != null) "--ssh.authorized-keys='${cfg.ssh.authorizedKeys}'"
+    ++ lib.optional (cfg.tailscale.enable && cfg.tailscale.args != null) "--tailscale.args=${cfg.tailscale.args}"
     ++ lib.optional cfg.verbose "--verbose";
 
-  # Build command for cache pre-warming (no output, just cache)
-  xmorphBuildArgs = lib.concatStringsSep " " (
-    [ "build" ] ++ layerArgs
-  );
+  # SSH args — pivot only.
+  sshArgs =
+    lib.optional cfg.ssh.enable "--ssh.enable"
+    ++ lib.optional (cfg.ssh.enable && cfg.ssh.port != null) "--ssh.port=${toString cfg.ssh.port}"
+    ++ lib.optional (cfg.ssh.enable && cfg.ssh.password != null) "--ssh.password=${cfg.ssh.password}"
+    ++ lib.optional (cfg.ssh.enable && cfg.ssh.authorizedKeys != null) "--ssh.authorized-keys=${cfg.ssh.authorizedKeys}";
 
-  # Pivot command
-  xmorphArgs = lib.concatStringsSep " " (
+  buildArgs = [ "build" ] ++ commonArgs;
+
+  pivotArgs =
     [ "pivot" "--systemd-mode" "--force" ]
-    ++ layerArgs
-    ++ lib.optional (cfg.entrypoint != null) "--entrypoint ${cfg.entrypoint}"
-    ++ (map (c: "--command ${c}") cfg.command)
-    ++ lib.optional (cfg.workDir != null) "--work-dir ${cfg.workDir}"
-    ++ lib.optional (cfg.logDir != null) "--log-dir ${cfg.logDir}"
-  );
+    ++ commonArgs
+    ++ sshArgs
+    ++ lib.optional (cfg.entrypoint != null) "--entrypoint=${cfg.entrypoint}"
+    ++ (map (c: "--command=${c}") cfg.command)
+    ++ lib.optional (cfg.workDir != null) "--work-dir=${cfg.workDir}"
+    ++ lib.optional (cfg.logDir != null) "--log-dir=${cfg.logDir}";
+
+  needAuthKey = cfg.tailscale.enable && cfg.tailscale.authKeyFile != null;
+
+  # systemd's ExecStart is not a shell, so `--tailscale.authkey=$(cat ...)`
+  # would be passed literally. Wrap the invocation in a small script that
+  # reads the key file at runtime (keeping the secret out of the nix store)
+  # and appends it as a real argument.
+  mkExecStart = name: baseArgs: pkgs.writeShellScript name ''
+    set -euo pipefail
+    ${lib.optionalString needAuthKey
+      ''authkey="$(cat ${lib.escapeShellArg (toString cfg.tailscale.authKeyFile)})"''}
+    exec ${cfg.package}/bin/xmorph ${lib.escapeShellArgs baseArgs} ${
+      lib.optionalString needAuthKey ''--tailscale.authkey="$authkey"''
+    }
+  '';
 in
 {
   options.services.xmorph = {
@@ -152,7 +166,7 @@ in
         Type = "oneshot";
         RemainAfterExit = true;
 
-        ExecStart = "${cfg.package}/bin/xmorph ${xmorphArgs}";
+        ExecStart = mkExecStart "xmorph-pivot-start" pivotArgs;
 
         CacheDirectory = "xmorph";
         RuntimeDirectory = "xmorph";
@@ -176,7 +190,7 @@ in
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
-        ExecStart = "${cfg.package}/bin/xmorph ${xmorphBuildArgs}";
+        ExecStart = mkExecStart "xmorph-cache-warm-start" buildArgs;
         CacheDirectory = "xmorph";
         RuntimeDirectory = "xmorph";
         TimeoutStartSec = "infinity";

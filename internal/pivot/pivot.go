@@ -50,13 +50,15 @@ func CreateMountNamespace() error {
 	return nil
 }
 
-// EnsureMountPoint bind-mounts target onto itself so pivot_root sees it
-// as a "real" mount point (a kernel requirement). Idempotent: if target
-// is already a mount, the bind is a no-op.
+// EnsureMountPoint bind-mounts target onto itself so pivot_root sees it as a
+// "real" mount point (a kernel requirement). Note this is NOT idempotent: a
+// non-recursive self-bind always stacks a fresh mount over target that does
+// not carry target's existing child mounts, so it must be done BEFORE any
+// submounts (/proc, /sys, /dev) are established under target — otherwise it
+// shadows them. Callers should invoke this exactly once, before populating
+// target. See Prepare.
 func EnsureMountPoint(target string) error {
 	if err := unix.Mount(target, target, "", unix.MS_BIND, ""); err != nil {
-		// EINVAL/EBUSY here usually means "already a mount" — let the
-		// caller decide whether to treat as fatal.
 		return err
 	}
 	return nil
@@ -94,15 +96,18 @@ func SetupEssentials(newRoot string) error {
 // PivotRoot executes the sequence that swaps the process's rootfs:
 //
 //  1. MakePrivate("/")
-//  2. EnsureMountPoint(newRoot) + MakePrivate(newRoot)
-//  3. pivot_root(newRoot, newRoot/oldRootMount)
-//  4. chdir("/")
+//  2. pivot_root(newRoot, newRoot/oldRootMount)
+//  3. chdir("/")
 //
-// EssentialMounts must already be set up by the caller (e.g. via
-// SetupEssentials). After return, "/" is newRoot and the old root is
-// at "/" + oldRootMount.
+// The caller MUST have already run Prepare (or otherwise self-bound newRoot
+// and set up EssentialMounts). PivotRoot deliberately does NOT re-bind
+// newRoot onto itself: a second non-recursive self-bind here would stack a
+// fresh mount over newRoot that shadows the /proc, /sys, and /dev mounts
+// Prepare put there, so the pivoted system would boot without them. After
+// return, "/" is newRoot and the old root is at "/" + oldRootMount.
 func PivotRoot(newRoot, oldRootMount string) error {
-	// Step 1.
+	// Step 1. Ensure "/" is private so pivot_root's mount changes don't
+	// propagate to peer namespaces. Idempotent with Prepare's rec-private.
 	if err := MakePrivate("/"); err != nil {
 		// MS_PRIVATE on "/" can fail in environments where "/" isn't
 		// actually a mount (some containers). Log via return — caller
@@ -110,16 +115,7 @@ func PivotRoot(newRoot, oldRootMount string) error {
 		return fmt.Errorf("make / private: %w", err)
 	}
 
-	// Step 2.
-	if err := EnsureMountPoint(newRoot); err != nil {
-		// If already a mount point, bind is harmless; continue.
-		_ = err
-	}
-	if err := MakePrivate(newRoot); err != nil {
-		return fmt.Errorf("make new root private: %w", err)
-	}
-
-	// Step 3. pivot_root requires the old-root path to exist *inside*
+	// Step 2. pivot_root requires the old-root path to exist *inside*
 	// new_root; the caller should have called ensureDir(newRoot + "/" + oldRootMount)
 	// before now.
 	putOld := joinPath(newRoot, oldRootMount)
@@ -127,7 +123,7 @@ func PivotRoot(newRoot, oldRootMount string) error {
 		return fmt.Errorf("pivot_root(%s, %s): %w", newRoot, putOld, err)
 	}
 
-	// Step 4.
+	// Step 3.
 	if err := unix.Chdir("/"); err != nil {
 		return fmt.Errorf("chdir(/): %w", err)
 	}

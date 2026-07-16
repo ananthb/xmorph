@@ -24,6 +24,32 @@ jobs:
       - name: Compile binary via nix
         run: nix build
 
+  integration:
+    name: pivot integration (NixOS VM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - uses: cachix/cachix-action@v15
+        with:
+          name: ananthb
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      # NixOS VM tests boot a guest under QEMU/KVM; expose /dev/kvm to the job.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # Real-kernel coverage of the pivot path: pivot_root + mount ordering
+      # and the tar-extraction containment tests, run as root inside the VM.
+      - name: pivot_root + extraction VM test
+        run: nix build -L .#checks.x86_64-linux.nixos-pivot
+
   goreleaser-check:
     name: goreleaser check + snapshot smoke test
     runs-on: ubuntu-latest
