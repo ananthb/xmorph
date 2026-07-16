@@ -30,5 +30,6 @@ reprovisioning recipes at **[ananthb.github.io/xmorph](https://ananthb.github.io
 
 - [Rescue an unreachable host](docs/rescue.md)
 - [Reprovision to Flatcar / FCOS / Alpine / NixOS / Ubuntu](docs/reprovision/)
+- [Testing (unit, NixOS VM, real-kernel dev loop)](docs/testing.md)
 
 Licensed under the [AGPL-3.0](LICENSE).

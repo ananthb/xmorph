@@ -5,12 +5,18 @@ package pivot
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
 
 	"golang.org/x/sys/unix"
 )
+
+// pivotChildEnv, when set, tells TestPivotRootChild to actually perform the
+// pivot (it is otherwise a no-op that a normal `go test` run skips). Its
+// value is the path to the new root.
+const pivotChildEnv = "XMORPH_TEST_PIVOT_ROOT"
 
 // minimalRoot creates a directory that looks enough like a rootfs for
 // Prepare to mount the essentials into it.
@@ -84,6 +90,58 @@ func TestPrepareEssentialsVisible(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestPivotRootEndToEnd performs a real pivot_root and asserts /proc, /sys,
+// and /dev are mounted and usable *after* the swap — the full end-to-end
+// version of the mount-ordering regression. It runs the pivot in a separate
+// child process (re-execing this test binary) so the swap can't disturb the
+// test driver's own root.
+func TestPivotRootEndToEnd(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("needs root + CAP_SYS_ADMIN for pivot_root")
+	}
+	root := minimalRoot(t)
+	if err := os.MkdirAll(filepath.Join(root, "mnt", "oldroot"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(exe, "-test.run", "TestPivotRootChild", "-test.v")
+	cmd.Env = append(os.Environ(), pivotChildEnv+"="+root)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("pivot child failed: %v\n%s", err, out)
+	}
+}
+
+// TestPivotRootChild is the child half of TestPivotRootEndToEnd: it prepares
+// and pivots into the root passed via pivotChildEnv, then verifies the
+// essentials survived. Without the env var it is skipped, so it stays inert
+// during a normal test run.
+func TestPivotRootChild(t *testing.T) {
+	root := os.Getenv(pivotChildEnv)
+	if root == "" {
+		t.Skip("child half of TestPivotRootEndToEnd")
+	}
+	runtime.LockOSThread() // never unlocked: this process pivots and exits
+	if err := Prepare(PrepareOptions{
+		NewRoot:         root,
+		SkipVerify:      true,
+		CreateNamespace: true,
+	}); err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	if err := PivotRoot(root, "mnt/oldroot"); err != nil {
+		t.Fatalf("PivotRoot: %v", err)
+	}
+	// "/" is now the pivoted root; the essentials must be present and usable.
+	for _, p := range []string{"/proc/self/status", "/sys/kernel", "/dev/null"} {
+		if _, err := os.Stat(p); err != nil {
+			t.Fatalf("%s missing after pivot_root: %v", p, err)
+		}
 	}
 }
 
