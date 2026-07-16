@@ -153,6 +153,93 @@ func TestExtractTarPathTraversal(t *testing.T) {
 	}
 }
 
+// TestExtractTarSymlinkEscape verifies that a layer which plants a symlink
+// pointing outside targetDir cannot then write (or delete) through it onto
+// the host: the write must be contained inside targetDir.
+func TestExtractTarSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	victim := filepath.Join(outside, "victim")
+	if err := os.WriteFile(victim, []byte("original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, "target")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Entry A plants an absolute symlink escape -> <outside>; entry B tries
+	// to write escape/victim, which naively would clobber <outside>/victim.
+	data := makeTar(t, []tarEntry{
+		{name: "escape", typ: tar.TypeSymlink, linkname: outside},
+		{name: "escape/victim", typ: tar.TypeReg, mode: 0o644, body: []byte("pwned")},
+	})
+	if err := extractTar(tar.NewReader(bytes.NewReader(data)), target); err != nil {
+		t.Fatalf("extractTar: %v", err)
+	}
+
+	if b, err := os.ReadFile(victim); err != nil || string(b) != "original" {
+		t.Errorf("host file escaped containment: %q err=%v", b, err)
+	}
+	// The write should have landed inside the target instead.
+	if b, err := os.ReadFile(filepath.Join(target, outside, "victim")); err != nil || string(b) != "pwned" {
+		t.Errorf("contained write missing: %q err=%v", b, err)
+	}
+}
+
+// TestExtractTarHardlinkEscape verifies a layer cannot hardlink a host file
+// into the rootfs (which would expose its contents).
+func TestExtractTarHardlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret")
+	if err := os.WriteFile(secret, []byte("s3cr3t"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	data := makeTar(t, []tarEntry{
+		{name: "leak", typ: tar.TypeLink, linkname: "../../../../../../" + secret},
+	})
+	// Either the link is refused, or it is contained inside root — never a
+	// link to the host secret.
+	_ = extractTar(tar.NewReader(bytes.NewReader(data)), root)
+	if fi, err := os.Lstat(filepath.Join(root, "leak")); err == nil {
+		if os.SameFile(fileInfoOf(t, secret), fi) {
+			t.Errorf("hardlink escaped to host secret")
+		}
+	}
+}
+
+func fileInfoOf(t *testing.T, p string) os.FileInfo {
+	t.Helper()
+	fi, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fi
+}
+
+// TestExtractTarPreservesSetuid checks that the setuid bit survives
+// extraction (it must, or privileged binaries in the rootfs break).
+func TestExtractTarPreservesSetuid(t *testing.T) {
+	dir := t.TempDir()
+	data := makeTar(t, []tarEntry{
+		{name: "usr/bin/sudo", typ: tar.TypeReg, mode: 0o4755, body: []byte("elf")},
+	})
+	if err := extractTar(tar.NewReader(bytes.NewReader(data)), dir); err != nil {
+		t.Fatalf("extractTar: %v", err)
+	}
+	fi, err := os.Stat(filepath.Join(dir, "usr/bin/sudo"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode()&fs.ModeSetuid == 0 {
+		t.Errorf("setuid bit lost: mode=%v", fi.Mode())
+	}
+	if fi.Mode().Perm() != 0o755 {
+		t.Errorf("perm = %o, want 0755", fi.Mode().Perm())
+	}
+}
+
 func TestExtractTarLaterLayerWins(t *testing.T) {
 	dir := t.TempDir()
 	layer1 := makeTar(t, []tarEntry{

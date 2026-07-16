@@ -14,10 +14,10 @@ replacement that stays reachable over Tailscale.
 # Nix
 nix run github:ananthb/xmorph -- --help
 
-# Static binary (each release ships SHA256SUMS)
-curl -LO https://github.com/ananthb/xmorph/releases/latest/download/xmorph-x86_64-linux
-chmod +x xmorph-x86_64-linux
-sudo mv xmorph-x86_64-linux /usr/local/bin/xmorph
+# Static binary (each release ships a SHA256SUMS file alongside the archives)
+curl -LO https://github.com/ananthb/xmorph/releases/latest/download/xmorph-x86_64-linux.tar.gz
+tar xzf xmorph-x86_64-linux.tar.gz
+sudo mv xmorph/xmorph /usr/local/bin/xmorph
 
 # From source (Go 1.26+)
 CGO_ENABLED=0 go build -o xmorph ./cmd/xmorph
