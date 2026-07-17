@@ -251,6 +251,28 @@ func runPivot(ctx context.Context, cfg *config.Config, stdout interface {
 		slog.Info("systemd-mode: skipping init coordination + process termination")
 	}
 
+	// Arm the watchdog now, right before the pivot, so the window until the
+	// supervisor adopts it (just the mount sequence + exec) is tiny. It's
+	// opened here on the host /dev; the fd is inherited across pivot_root and
+	// the exec, and pet post-pivot via WatchdogFDEnv. pivot_root keeps the
+	// running kernel, so it's the same live watchdog throughout — no softdog,
+	// no reopen by path in the pivoted rootfs. (EnsureWatchdogAvailable above
+	// already validated it while the old OS was fully alive.)
+	var watchdogFile *os.File
+	if cfg.WatchdogTimeout > 0 {
+		wf, err := postpivot.ArmWatchdogPrePivot(cfg.WatchdogTimeout)
+		if err != nil {
+			return fmt.Errorf("arm watchdog: %w", err)
+		}
+		watchdogFile = wf
+		// Runs only on an abort before exec (unix.Exec never returns on
+		// success): disarm so a box that's staying on the old OS isn't reset.
+		defer func() {
+			_, _ = watchdogFile.Write([]byte{'V'}) // magic close = disarm
+			_ = watchdogFile.Close()
+		}()
+	}
+
 	// All goroutines below this point share a single OS thread so the
 	// new mount namespace is consistent across what we do.
 	runtime.LockOSThread()
@@ -300,9 +322,15 @@ func runPivot(ctx context.Context, cfg *config.Config, stdout interface {
 	}
 
 	// Exec the post-pivot supervisor: /usr/local/bin/xmorph --init <argv>.
+	// Hand the pre-armed watchdog fd across the exec so the supervisor pets
+	// the same live device instead of reopening it in the pivoted /dev.
+	env := os.Environ()
+	if watchdogFile != nil {
+		env = append(env, fmt.Sprintf("%s=%d", postpivot.WatchdogFDEnv, watchdogFile.Fd()))
+	}
 	slog.Info("exec post-pivot supervisor", "binary", postpivot.BinaryPath, "entrypoint", entrypoint)
 	supervisorArgv := append([]string{postpivot.BinaryPath, "--init", entrypoint}, entryArgs...)
-	if err := unix.Exec(postpivot.BinaryPath, supervisorArgv, os.Environ()); err != nil {
+	if err := unix.Exec(postpivot.BinaryPath, supervisorArgv, env); err != nil {
 		return fmt.Errorf("exec post-pivot supervisor: %w", err)
 	}
 	return nil // unreachable

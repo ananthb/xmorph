@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/ananthb/xmorph/internal/tsnetauth"
@@ -65,11 +66,18 @@ func Run(argv []string) int {
 	}
 
 	if cfg != nil && cfg.WatchdogTimeoutSeconds > 0 {
-		wd, err := StartWatchdog(time.Duration(cfg.WatchdogTimeoutSeconds) * time.Second)
-		if err != nil {
-			slog.Error("watchdog: cannot arm post-pivot", "err", err)
+		timeout := time.Duration(cfg.WatchdogTimeoutSeconds) * time.Second
+		// The watchdog was opened and armed pre-pivot; its fd is inherited
+		// here via WatchdogFDEnv. Adopt and pet it — don't reopen
+		// /dev/watchdog by path, which the pivoted /dev may not expose.
+		if s := os.Getenv(WatchdogFDEnv); s != "" {
+			if fd, err := strconv.Atoi(s); err == nil {
+				defer AdoptWatchdog(fd, timeout).Close()
+			} else {
+				slog.Error("watchdog: invalid inherited fd", "value", s, "err", err)
+			}
 		} else {
-			defer wd.Close()
+			slog.Warn("watchdog: no inherited fd from pre-pivot; not armed post-pivot")
 		}
 	}
 
