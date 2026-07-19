@@ -16,9 +16,11 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Watchdog holds /dev/watchdog open and pets it from a goroutine.
-// Kernel-only — no userspace fallback. If /dev/watchdog is missing,
-// StartWatchdog auto-loads softdog and errors out if that fails.
+// Watchdog holds a kernel watchdog fd open and pets it from a goroutine.
+// The fd is normally armed pre-pivot (ArmWatchdogPrePivot) and inherited
+// across the pivot, then adopted here (AdoptWatchdog). StartWatchdog is the
+// standalone path that opens /dev/watchdog directly (loading softdog if it's
+// missing) — usable only where the device node is reachable by path.
 type Watchdog struct {
 	timeout time.Duration
 	fd      *os.File
@@ -36,6 +38,13 @@ const wdMagicClose byte = 'V'
 
 // watchdogDev is the kernel watchdog device path. var so tests can swap it.
 var watchdogDev = "/dev/watchdog"
+
+// WatchdogFDEnv carries the pre-pivot watchdog fd number across the exec
+// into the post-pivot supervisor. pivot_root keeps the running kernel, so a
+// watchdog opened before the pivot keeps ticking after it — we inherit the
+// open fd rather than reopening /dev/watchdog by path in the pivoted rootfs,
+// whose /dev may not expose the node.
+const WatchdogFDEnv = "XMORPH_WATCHDOG_FD"
 
 // modprobeCmd auto-loads softdog when /dev/watchdog is absent. var
 // so tests can swap it for a fake.
@@ -150,6 +159,60 @@ func StartWatchdog(timeout time.Duration) (*Watchdog, error) {
 	}
 	go w.pet()
 	return w, nil
+}
+
+// ArmWatchdogPrePivot opens and arms the kernel watchdog BEFORE pivot_root,
+// while the host /dev still exposes it, and clears FD_CLOEXEC so the open fd
+// survives the exec into the post-pivot supervisor. The caller passes the fd
+// number to the supervisor via WatchdogFDEnv; the supervisor pets it with
+// AdoptWatchdog. Because pivot_root keeps the running kernel, this is the
+// same live watchdog throughout — no reopen by path in the pivoted rootfs
+// (where the node may be absent) and no softdog (which can't load for the
+// running kernel from an in-RAM rootfs). Non-positive timeout is a no-op.
+//
+// The returned *os.File must stay referenced until the exec so its finalizer
+// doesn't close the fd; on any abort before exec the caller must disarm it
+// (write wdMagicClose) and close it, else the box resets while staying on the
+// old OS.
+func ArmWatchdogPrePivot(timeout time.Duration) (*os.File, error) {
+	if timeout <= 0 {
+		return nil, nil
+	}
+	f, err := openWatchdog()
+	if err != nil {
+		return nil, err
+	}
+	secs := int(timeout / time.Second)
+	if secs < 1 {
+		secs = 1
+	}
+	if err := unix.IoctlSetPointerInt(int(f.Fd()), _WDIOC_SETTIMEOUT, secs); err != nil {
+		slog.Warn("watchdog: set timeout failed; using kernel default", "err", err)
+	}
+	// Clear FD_CLOEXEC (Go sets it on every fd it opens) so the fd is
+	// inherited across unix.Exec into the supervisor.
+	if _, err := unix.FcntlInt(f.Fd(), unix.F_SETFD, 0); err != nil {
+		_, _ = f.Write([]byte{wdMagicClose})
+		_ = f.Close()
+		return nil, fmt.Errorf("clear FD_CLOEXEC on watchdog fd: %w", err)
+	}
+	slog.Info("watchdog: armed pre-pivot (fd inherits across pivot)", "timeout", timeout, "fd", int(f.Fd()))
+	return f, nil
+}
+
+// AdoptWatchdog takes over an already-open, already-armed watchdog fd
+// inherited (via WatchdogFDEnv) from the pre-pivot ArmWatchdogPrePivot call
+// and pets it from a goroutine. Use this post-pivot instead of StartWatchdog,
+// which would try to reopen /dev/watchdog by path.
+func AdoptWatchdog(fd int, timeout time.Duration) *Watchdog {
+	w := &Watchdog{
+		timeout: timeout,
+		fd:      os.NewFile(uintptr(fd), watchdogDev),
+		done:    make(chan struct{}),
+	}
+	slog.Info("watchdog: adopted inherited fd", "fd", fd, "timeout", timeout)
+	go w.pet()
+	return w
 }
 
 func (w *Watchdog) pet() {
