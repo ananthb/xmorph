@@ -6,7 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 
-	"github.com/ananthb/xmorph/internal/config"
+	"go.calculon.tech/xmorph/internal/config"
 )
 
 // ComputeCacheKey returns the 64-character lowercase-hex SHA-256 of the

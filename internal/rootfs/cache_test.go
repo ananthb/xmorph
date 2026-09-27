@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"github.com/ananthb/xmorph/internal/config"
+	"go.calculon.tech/xmorph/internal/config"
 )
 
 // TestComputeCacheKeyByteParity exercises the byte-for-byte parity claim

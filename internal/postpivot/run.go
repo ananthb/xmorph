@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/ananthb/xmorph/internal/tsnetauth"
+	"go.calculon.tech/xmorph/internal/tsnetauth"
 )
 
 // Run is the entry point for `xmorph --init` after the pivot. Reads

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"os"
 
-	"github.com/ananthb/xmorph/internal/config"
+	"go.calculon.tech/xmorph/internal/config"
 )
 
 // ResolveTailscaleArgs returns the effective `tailscale up` argument

@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ananthb/xmorph/internal/config"
-	"github.com/ananthb/xmorph/internal/passphrase"
-	"github.com/ananthb/xmorph/internal/postpivot"
+	"go.calculon.tech/xmorph/internal/config"
+	"go.calculon.tech/xmorph/internal/passphrase"
+	"go.calculon.tech/xmorph/internal/postpivot"
 )
 
 // The last line of defence before anything destructive happens. A bare shell

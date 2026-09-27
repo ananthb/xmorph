@@ -1,4 +1,4 @@
-module github.com/ananthb/xmorph
+module go.calculon.tech/xmorph
 
 go 1.26.4
 

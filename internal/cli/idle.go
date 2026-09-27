@@ -1,8 +1,8 @@
 package cli
 
 import (
-	"github.com/ananthb/xmorph/internal/postpivot"
 	"github.com/spf13/cobra"
+	"go.calculon.tech/xmorph/internal/postpivot"
 )
 
 // newIdleCmd exposes "do nothing, stay alive" as a real program rather than a
