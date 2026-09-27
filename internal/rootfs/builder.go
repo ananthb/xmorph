@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ananthb/xmorph/internal/config"
-	"github.com/ananthb/xmorph/internal/oci"
+	"go.calculon.tech/xmorph/internal/config"
+	"go.calculon.tech/xmorph/internal/oci"
 )
 
 // BuildResult is what the builder hands back to the orchestrator.

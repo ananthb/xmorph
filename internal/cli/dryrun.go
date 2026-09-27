@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ananthb/xmorph/internal/config"
-	"github.com/ananthb/xmorph/internal/helpers"
-	"github.com/ananthb/xmorph/internal/initsys"
+	"go.calculon.tech/xmorph/internal/config"
+	"go.calculon.tech/xmorph/internal/helpers"
+	"go.calculon.tech/xmorph/internal/initsys"
 )
 
 // printDryRun writes the same byte-for-byte layout as src/cmd/pivot.zig:486-563

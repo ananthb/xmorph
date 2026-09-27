@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/ananthb/xmorph/internal/pivot"
+	"go.calculon.tech/xmorph/internal/pivot"
 	"golang.org/x/sys/unix"
 )
 

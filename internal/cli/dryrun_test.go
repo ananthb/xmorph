@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ananthb/xmorph/internal/config"
+	"go.calculon.tech/xmorph/internal/config"
 )
 
 // TestDryRunOutputShape locks in the Zig-parity format from

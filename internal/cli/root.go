@@ -12,10 +12,10 @@ import (
 	"log/syslog"
 	"os"
 
-	xlog "github.com/ananthb/xmorph/internal/log"
+	xlog "go.calculon.tech/xmorph/internal/log"
 
-	"github.com/ananthb/xmorph/internal/helpers"
 	"github.com/spf13/cobra"
+	"go.calculon.tech/xmorph/internal/helpers"
 )
 
 // LogHandler is the package-global slog.Handler for the binary. main()

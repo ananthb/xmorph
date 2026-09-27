@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ananthb/xmorph/internal/config"
 	"github.com/google/go-containerregistry/pkg/v1/layout"
+	"go.calculon.tech/xmorph/internal/config"
 )
 
 // TestRunBuildFromLocalRootfs exercises the full M2 build path against a

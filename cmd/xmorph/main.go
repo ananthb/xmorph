@@ -12,9 +12,9 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/ananthb/xmorph/internal/cli"
-	"github.com/ananthb/xmorph/internal/helpers"
-	"github.com/ananthb/xmorph/internal/postpivot"
+	"go.calculon.tech/xmorph/internal/cli"
+	"go.calculon.tech/xmorph/internal/helpers"
+	"go.calculon.tech/xmorph/internal/postpivot"
 
 	"golang.org/x/term"
 )

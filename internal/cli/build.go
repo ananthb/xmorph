@@ -7,10 +7,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/ananthb/xmorph/internal/config"
-	"github.com/ananthb/xmorph/internal/oci"
-	"github.com/ananthb/xmorph/internal/rootfs"
 	"github.com/spf13/cobra"
+	"go.calculon.tech/xmorph/internal/config"
+	"go.calculon.tech/xmorph/internal/oci"
+	"go.calculon.tech/xmorph/internal/rootfs"
 )
 
 func newBuildCmd() *cobra.Command {
