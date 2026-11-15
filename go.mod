@@ -4,7 +4,7 @@ go 1.26.4
 
 require (
 	github.com/creack/pty v1.1.24
-	github.com/godbus/dbus/v5 v5.1.1-0.20230522191255-76236955d466
+	github.com/godbus/dbus/v5 v5.2.4
 	github.com/google/go-containerregistry v0.21.7
 	github.com/google/nftables v0.2.1-0.20240414091927-5e242ec57806
 	github.com/spf13/cobra v1.10.2
